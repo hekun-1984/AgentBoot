@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentboot"
+version = "0.1.0"
+description = "借鉴 Spring Boot 体验的 Agent 业务开发框架，注册子图或能力即可二次开发。"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+dependencies = ["PyYAML>=6.0"]
+
+[project.optional-dependencies]
+langgraph = ["langgraph>=0.2.0"]
+dev = ["pytest>=8.0"]
+
+[tool.setuptools.packages.find]
+include = ["agentboot*", "agents*", "skills*", "plans*", "routes*", "config*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

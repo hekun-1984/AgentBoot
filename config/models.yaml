@@ -1,0 +1,13 @@
+# LLM 模型适配配置。AGENTBOOT_LLM_MODEL / AGENTBOOT_LLM_BASE_URL 会覆盖这里的默认档。
+default:
+  provider: openai-compatible
+  model: gpt-4o-mini
+  temperature: 0
+  timeout_seconds: 60
+
+profiles:
+  planner:
+    provider: openai-compatible
+    model: gpt-4o-mini
+    temperature: 0
+    timeout_seconds: 60
