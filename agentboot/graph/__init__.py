@@ -11,7 +11,6 @@ from langgraph.types import Send
 
 from agentboot.agent import parse_json_object
 from agentboot.state import GraphState
-from agentboot.text import extract_glucose
 from agentboot.tracing import new_span, snapshot, start_timer
 
 
@@ -43,7 +42,6 @@ class BaseGraph:
     max_steps = 6
     high_risk_levels = ("high", "critical")
     emergency_symptoms: tuple[str, ...] = ()
-    critical_tool = ""
 
     def __init__(self) -> None:
         self.model = None
@@ -115,37 +113,23 @@ class BaseGraph:
             return "没有可执行的子图。"
         return json.dumps(results, ensure_ascii=False)
 
+    def screen(self, user_input: str, shared_context: dict) -> dict:
+        """路由前的固定检查。子类在这里写入领域字段，需要时把 force_emergency 设为 True。"""
+        force = any(word in user_input for word in self.emergency_symptoms)
+        return {"user_input": user_input, "force_emergency": force}
+
     def compile(self):
         def safety(state: GraphState) -> dict:
             started = start_timer()
             text = str(state.get("user_input") or "")
             before = snapshot(state.get("shared_context") or {})
-            value = extract_glucose(text)
-            symptom_hit = any(word in text for word in self.emergency_symptoms)
-            assessment = None
-            tool = self._tools.get(self.critical_tool) if self.critical_tool else None
-            if value is not None and tool is not None:
-                assessment = tool.fn(
-                    glucose_value=value,
-                    symptoms=text,
-                    fasting="空腹" in text,
-                )
-                if assessment.get("level") in self.high_risk_levels:
-                    symptom_hit = True
-            intake = {
-                "mentioned_glucose": value,
-                "fasting_mentioned": "空腹" in text,
-                "assessment": assessment,
-                "force_emergency": symptom_hit,
-            }
-            context = {"intake": intake, "force_emergency": symptom_hit, "user_input": text}
-            if value is not None:
-                context["mentioned_glucose"] = value
+            context = self.screen(text, dict(state.get("shared_context") or {}))
+            context.setdefault("user_input", text)
             span = new_span(
                 kind="graph",
                 name="safety_screen",
                 span_input=text,
-                span_output=intake,
+                span_output={key: context.get(key) for key in ("force_emergency", "intake")},
                 started=started,
                 state_before=before,
                 state_after={**before, **context},
