@@ -13,7 +13,7 @@ from agentboot.graph import BaseGraph
 from agentboot.llm import ChatModel, load_model
 from agentboot.registry import Registry
 from agentboot.subgraph import BaseSubgraph
-from agentboot.tools import ToolEntry
+from agentboot.tool import ToolEntry
 
 
 class CompiledApplication:

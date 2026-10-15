@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from agentboot import BaseAgent
-from diabetes.agents.common import calls, data_of, final, payloads
+from diabetes.agent.common import calls, data_of, final, payloads
 
 _EMERGENCY_SYMPTOMS = ("昏迷", "意识不清", "胸痛", "抽搐", "叫不醒", "手抖")
 

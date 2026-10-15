@@ -5,7 +5,7 @@ from langchain_core.messages import AIMessage
 from agentboot import BaseAgent, BaseGraph, BaseSubgraph, ScriptedModel
 from agentboot.application import AgentBootApplication
 from diabetes import build_app
-from diabetes.store import STORE
+from diabetes.tool.store import STORE
 
 
 def test_subgraph_keeps_a_fixed_order_and_passes_context():

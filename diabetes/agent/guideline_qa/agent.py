@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from agentboot import BaseAgent
-from diabetes.agents.common import calls, data_of, final, payloads
+from diabetes.agent.common import calls, data_of, final, payloads
 
 _TERMS = ("糖尿病", "血糖", "糖化", "hba1c", "胰岛素", "二甲双胍", "低血糖", "饮食", "运动")
 

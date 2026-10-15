@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from agentboot.exceptions import RegistrationError
-from agentboot.tools import ToolEntry
+from agentboot.tool import ToolEntry
 
 
 class Registry:

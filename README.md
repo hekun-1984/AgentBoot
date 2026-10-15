@@ -66,3 +66,22 @@ print(result.trace[0]["children"])
 `result.error_kind` 为 `llm` 表示模型决策或结构化输出失败，`tool` 表示工具抛错，`state` 表示声明的必填输入没有传到。
 
 业务包替换 `diabetes` 即可。`agentboot` 里没有糖尿病规则。
+
+## 目录
+
+框架和示例都按四层分目录。`agentboot` 里同名目录是基类，`diabetes` 里同名目录是业务实现。注册、状态、追踪这些运行时文件留在 `agentboot` 根下，不属于某一层。
+
+```text
+agentboot/
+├── tool/            # @tool
+├── agent/           # BaseAgent
+├── subgraph/        # BaseSubgraph
+├── graph/           # BaseGraph
+├── application.py
+└── registry.py
+diabetes/
+├── tool/            # 档案、血糖、指南、危急值等原子能力
+├── agent/           # 每个 Agent 一个目录，旁边放 SKILL.md
+├── subgraph/        # risk_check、guideline_qa、management_plan、emergency
+└── graph/           # 主图 DiabetesAssistantGraph
+```

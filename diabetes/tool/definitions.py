@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 from agentboot import tool
-from diabetes.store import STORE
+from diabetes.tool.store import STORE
 
 GUIDELINES = [
     {

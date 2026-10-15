@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from agentboot import BaseAgent
-from diabetes.agents.common import calls, data_of, final, payloads
+from diabetes.agent.common import calls, data_of, final, payloads
 
 
 class PatientDataAgent(BaseAgent):

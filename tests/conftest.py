@@ -1,6 +1,6 @@
 import pytest
 
-from diabetes.store import STORE
+from diabetes.tool.store import STORE
 
 
 @pytest.fixture(autouse=True)

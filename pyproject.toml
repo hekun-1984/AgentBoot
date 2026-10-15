@@ -23,7 +23,7 @@ build-backend = "setuptools.build_meta"
 include = ["agentboot*", "diabetes*"]
 
 [tool.setuptools.package-data]
-diabetes = ["agents/*/SKILL.md"]
+diabetes = ["agent/*/SKILL.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
