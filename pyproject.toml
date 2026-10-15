@@ -1,0 +1,30 @@
+[project]
+name = "agentboot"
+version = "0.1.0"
+description = "基于 LangGraph 的 Agent 业务开发框架。注册 Tool、Agent、Subgraph 即可编排主图。"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "langgraph>=1.0",
+    "langchain>=1.0",
+    "langchain-core>=1.0",
+    "pydantic>=2",
+    "pyyaml>=6",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["agentboot*", "diabetes*"]
+
+[tool.setuptools.package-data]
+diabetes = ["agents/*/SKILL.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

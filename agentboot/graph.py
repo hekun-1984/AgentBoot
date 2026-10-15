@@ -1,0 +1,337 @@
+"""主图：只决定用哪些子图、按什么波次执行，并保留兜底。"""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from langchain_core.messages import HumanMessage, SystemMessage
+from langgraph.graph import END, START, StateGraph
+from langgraph.types import Send
+
+from agentboot.agent import parse_json_object
+from agentboot.state import GraphState
+from agentboot.text import extract_glucose
+from agentboot.tracing import new_span, snapshot, start_timer
+
+
+def group_waves(steps: list[dict]) -> list[list[str]]:
+    waves: list[list[str]] = []
+    positions: dict[str, int] = {}
+    for step in steps:
+        name = step["subgraph"]
+        group = step.get("parallel_group")
+        if not group:
+            waves.append([name])
+            continue
+        if group not in positions:
+            positions[group] = len(waves)
+            waves.append([])
+        if name not in waves[positions[group]]:
+            waves[positions[group]].append(name)
+    return waves
+
+
+class BaseGraph:
+    """主图白名单来自 subgraphs。安全筛查和空计划兜底不交给模型。"""
+
+    name = ""
+    description = ""
+    subgraphs: list[str] = []
+    fallback_subgraph = ""
+    emergency_subgraph = ""
+    max_steps = 6
+    high_risk_levels = ("high", "critical")
+    emergency_symptoms: tuple[str, ...] = ()
+    critical_tool = ""
+
+    def __init__(self) -> None:
+        self.model = None
+        self._tools: dict[str, Any] = {}
+        self._compiled_subgraphs: dict[str, Any] = {}
+        self.catalog: list[dict[str, str]] = []
+        self.graph = None
+
+    def bind(self, subgraphs: dict[str, Any], tools: dict[str, Any], model: Any = None) -> "BaseGraph":
+        missing = [name for name in self.subgraphs if name not in subgraphs]
+        if missing:
+            joined = ", ".join(missing)
+            raise KeyError(f"主图 {self.name} 缺少子图: {joined}")
+        self._compiled_subgraphs = {name: subgraphs[name] for name in self.subgraphs}
+        self._tools = tools
+        self.model = model
+        self.catalog = [
+            {"name": name, "description": subgraphs[name].description}
+            for name in self.subgraphs
+        ]
+        self.graph = self.compile()
+        return self
+
+    def offline_route(self, user_input: str, catalog: list[dict], shared_context: dict) -> dict:
+        return {"steps": [], "reason": "未配置路由模型"}
+
+    def validate_plan(self, raw: dict | None) -> dict:
+        raw = raw or {}
+        allowed = set(self.subgraphs)
+        cleaned = []
+        for step in raw.get("steps") or []:
+            if not isinstance(step, dict):
+                continue
+            name = step.get("subgraph")
+            if name not in allowed:
+                continue
+            cleaned.append({"subgraph": name, "parallel_group": step.get("parallel_group")})
+        reason = str(raw.get("reason") or "")
+        if len(cleaned) > self.max_steps:
+            cleaned = cleaned[: self.max_steps]
+            reason = f"{reason} | 超过最大步数，已截断".strip(" |")
+        if not cleaned and self.fallback_subgraph in allowed:
+            cleaned = [{"subgraph": self.fallback_subgraph, "parallel_group": None}]
+            reason = f"{reason} | 空计划兜底:{self.fallback_subgraph}".strip(" |")
+        return {"waves": group_waves(cleaned), "steps": cleaned, "reason": reason}
+
+    def build_plan(self, state: GraphState) -> dict:
+        context = state.get("shared_context") or {}
+        if context.get("force_emergency") and self.emergency_subgraph:
+            return self.validate_plan(
+                {
+                    "steps": [{"subgraph": self.emergency_subgraph}],
+                    "reason": "危急值或危急症状命中，只进入紧急升级",
+                }
+            )
+        raw: dict | None
+        if self.model is not None:
+            try:
+                raw = self._llm_route(str(state.get("user_input") or ""), context)
+            except Exception as exc:
+                raw = {"steps": [], "reason": f"路由模型失败: {exc}"}
+        else:
+            raw = self.offline_route(str(state.get("user_input") or ""), self.catalog, dict(context))
+        return self.validate_plan(raw)
+
+    def render_answer(self, state: GraphState) -> str:
+        results = state.get("results") or {}
+        if not results:
+            return "没有可执行的子图。"
+        return json.dumps(results, ensure_ascii=False)
+
+    def compile(self):
+        def safety(state: GraphState) -> dict:
+            started = start_timer()
+            text = str(state.get("user_input") or "")
+            before = snapshot(state.get("shared_context") or {})
+            value = extract_glucose(text)
+            symptom_hit = any(word in text for word in self.emergency_symptoms)
+            assessment = None
+            tool = self._tools.get(self.critical_tool) if self.critical_tool else None
+            if value is not None and tool is not None:
+                assessment = tool.fn(
+                    glucose_value=value,
+                    symptoms=text,
+                    fasting="空腹" in text,
+                )
+                if assessment.get("level") in self.high_risk_levels:
+                    symptom_hit = True
+            intake = {
+                "mentioned_glucose": value,
+                "fasting_mentioned": "空腹" in text,
+                "assessment": assessment,
+                "force_emergency": symptom_hit,
+            }
+            context = {"intake": intake, "force_emergency": symptom_hit, "user_input": text}
+            if value is not None:
+                context["mentioned_glucose"] = value
+            span = new_span(
+                kind="graph",
+                name="safety_screen",
+                span_input=text,
+                span_output=intake,
+                started=started,
+                state_before=before,
+                state_after={**before, **context},
+            )
+            return {"shared_context": context, "trace": [span]}
+
+        def route(state: GraphState) -> dict:
+            started = start_timer()
+            plan = self.build_plan(state)
+            span = new_span(
+                kind="graph",
+                name="route",
+                span_input={"user_input": state.get("user_input"), "catalog": [item["name"] for item in self.catalog]},
+                span_output=plan,
+                started=started,
+                state_before=state.get("shared_context"),
+                state_after=state.get("shared_context"),
+            )
+            return {
+                "plan": plan,
+                "route_reason": plan["reason"],
+                "wave_index": 0,
+                "step_count": 0,
+                "force_guard": False,
+                "trace": [span],
+            }
+
+        def fanout(state: GraphState) -> str | list[Send]:
+            plan = state.get("plan") or {}
+            waves = plan.get("waves") or []
+            index = int(state.get("wave_index") or 0)
+            if index >= len(waves):
+                return "guard"
+            if int(state.get("step_count") or 0) >= self.max_steps and not state.get("force_guard"):
+                return "guard"
+            context = dict(state.get("shared_context") or {})
+            return [
+                Send(
+                    "run_subgraph",
+                    {
+                        "target": name,
+                        "user_input": state.get("user_input"),
+                        "shared_context": context,
+                    },
+                )
+                for name in waves[index]
+            ]
+
+        def run_subgraph(state: GraphState) -> dict:
+            name = str(state.get("target") or "")
+            started = start_timer()
+            before = snapshot(state.get("shared_context") or {})
+            compiled = self._compiled_subgraphs[name]
+            try:
+                out = compiled.invoke(
+                    {
+                        "user_input": state.get("user_input") or "",
+                        "shared_context": dict(state.get("shared_context") or {}),
+                        "output": {},
+                        "trace": [],
+                        "errors": [],
+                    }
+                )
+            except Exception as exc:
+                span = new_span(
+                    kind="subgraph",
+                    name=name,
+                    span_input=before,
+                    span_output={"error": str(exc)},
+                    started=started,
+                    error=str(exc),
+                    error_kind="subgraph",
+                    state_before=before,
+                    state_after=before,
+                )
+                return {
+                    "results": {name: {"error": str(exc)}},
+                    "errors": [{"source": name, "message": str(exc), "error_kind": "subgraph"}],
+                    "trace": [span],
+                }
+            context = dict(out.get("shared_context") or {})
+            published = {key: context[key] for key in compiled.writes if key in context}
+            span = new_span(
+                kind="subgraph",
+                name=name,
+                span_input=before,
+                span_output=out.get("output"),
+                started=started,
+                state_before=before,
+                state_after=context,
+                children=list(out.get("trace") or []),
+                error=None if not out.get("errors") else out["errors"][0].get("message"),
+                error_kind=None if not out.get("errors") else out["errors"][0].get("error_kind"),
+            )
+            return {
+                "results": {name: dict(out.get("output") or {})},
+                "shared_context": published,
+                "trace": [span],
+                "errors": list(out.get("errors") or []),
+            }
+
+        def join(state: GraphState) -> dict:
+            return {
+                "wave_index": int(state.get("wave_index") or 0) + 1,
+                "step_count": int(state.get("step_count") or 0) + 1,
+                "force_guard": False,
+            }
+
+        def guard(state: GraphState) -> dict:
+            context = state.get("shared_context") or {}
+            level = context.get("risk_level")
+            ran = set(state.get("results") or {})
+            if (
+                level in self.high_risk_levels
+                and self.emergency_subgraph
+                and self.emergency_subgraph not in ran
+            ):
+                plan = self.validate_plan(
+                    {
+                        "steps": [{"subgraph": self.emergency_subgraph}],
+                        "reason": f"{state.get('route_reason') or ''} | 高危兜底".strip(" |"),
+                    }
+                )
+                return {"plan": plan, "wave_index": 0, "force_guard": True, "route_reason": plan["reason"]}
+            return {"force_guard": False}
+
+        def after_guard(state: GraphState) -> str:
+            if state.get("force_guard"):
+                return "fanout"
+            return "aggregate"
+
+        def aggregate(state: GraphState) -> dict:
+            started = start_timer()
+            answer = self.render_answer(state)
+            final = {
+                "answer": answer,
+                "shared_context": dict(state.get("shared_context") or {}),
+                "results": dict(state.get("results") or {}),
+                "plan": dict(state.get("plan") or {}),
+                "route_reason": state.get("route_reason") or "",
+                "trace": list(state.get("trace") or []),
+                "errors": list(state.get("errors") or []),
+            }
+            span = new_span(
+                kind="graph",
+                name=self.name,
+                span_input=state.get("user_input"),
+                span_output={"answer": answer, "plan": final["plan"]},
+                started=started,
+                state_before=None,
+                state_after=final["shared_context"],
+            )
+            final["trace"] = list(final["trace"]) + [span]
+            return {"final_output": final, "trace": [span]}
+
+        builder = StateGraph(GraphState)
+        builder.add_node("safety", safety)
+        builder.add_node("route", route)
+        builder.add_node("fanout", lambda state: {})
+        builder.add_node("run_subgraph", run_subgraph)
+        builder.add_node("join", join)
+        builder.add_node("guard", guard)
+        builder.add_node("aggregate", aggregate)
+        builder.add_edge(START, "safety")
+        builder.add_edge("safety", "route")
+        builder.add_edge("route", "fanout")
+        builder.add_conditional_edges("fanout", fanout, ["run_subgraph", "guard"])
+        builder.add_edge("run_subgraph", "join")
+        builder.add_edge("join", "fanout")
+        builder.add_conditional_edges("guard", after_guard, ["fanout", "aggregate"])
+        builder.add_edge("aggregate", END)
+        return builder.compile()
+
+    def _llm_route(self, user_input: str, shared_context: dict) -> dict:
+        catalog = json.dumps(self.catalog, ensure_ascii=False)
+        system = (
+            "你是主图路由器。只能从给定子图白名单里选择，不能发明子图，也不能规定子图内部步骤。"
+            "同一 parallel_group 的子图会并行。只返回 JSON："
+            '{"reason":"...","steps":[{"subgraph":"名字","parallel_group":"可选"}]}'
+        )
+        human = json.dumps(
+            {"user_input": user_input, "catalog": json.loads(catalog), "shared_context": shared_context},
+            ensure_ascii=False,
+        )
+        message = self.model.invoke(
+            [SystemMessage(content=system), HumanMessage(content=human)],
+            [],
+        )
+        return parse_json_object(message.content if isinstance(message.content, str) else str(message.content))
