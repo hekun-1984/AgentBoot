@@ -70,4 +70,5 @@ def load_skill(path: str | Path) -> SkillSpec:
         outputs=_fields(data.get("output"), default_required=True),
         required_tools=required_tools,
         system_prompt=parts[2].strip(),
+        model_slot=str(data.get("model") or "").strip(),
     )

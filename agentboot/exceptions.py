@@ -13,6 +13,10 @@ class SkillError(AgentBootError):
     """SKILL.md 缺失或无法解析。"""
 
 
+class ConfigurationError(AgentBootError):
+    """模型配置缺失或无法解析。"""
+
+
 class AgentExecutionError(AgentBootError):
     """Agent 按 abort 策略失败时抛出。"""
 

@@ -29,6 +29,7 @@ class SkillSpec:
     outputs: dict[str, FieldSpec] = field(default_factory=dict)
     required_tools: list[str] = field(default_factory=list)
     system_prompt: str = ""
+    model_slot: str = ""
 
     def __post_init__(self) -> None:
         if not self.name:

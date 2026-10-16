@@ -3,6 +3,7 @@
 from agentboot.agent import BaseAgent
 from agentboot.application import AgentBootApplication
 from agentboot.audit import JsonlTraceSink, MemoryTraceSink
+from agentboot.catalog import ModelCatalog
 from agentboot.graph import BaseGraph
 from agentboot.llm import ScriptedModel
 from agentboot.subgraph import BaseSubgraph
@@ -15,6 +16,7 @@ __all__ = [
     "BaseSubgraph",
     "JsonlTraceSink",
     "MemoryTraceSink",
+    "ModelCatalog",
     "ScriptedModel",
     "tool",
 ]

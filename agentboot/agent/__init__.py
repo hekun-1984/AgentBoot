@@ -24,7 +24,15 @@ def invoke_structured_message(model: Any, messages: list, spec: SkillSpec) -> AI
         data = data.model_dump()
     if not isinstance(data, dict):
         raise TypeError("结构化输出不是对象")
-    return AIMessage(content=json.dumps(data, ensure_ascii=False), additional_kwargs={"structured": True})
+    metadata = {}
+    option = getattr(model, "last_option", None)
+    if option:
+        metadata["model_option"] = option
+    return AIMessage(
+        content=json.dumps(data, ensure_ascii=False),
+        additional_kwargs={"structured": True},
+        response_metadata=metadata,
+    )
 
 
 def parse_json_object(content: str) -> dict:
@@ -76,6 +84,7 @@ class BaseAgent:
     input_fields: dict[str, str] = {}
     output_fields: dict[str, str] = {}
     required_tools: list[str] = []
+    model_slot = ""
 
     def __init__(self) -> None:
         self.spec = self._load_spec()
@@ -87,7 +96,10 @@ class BaseAgent:
 
     def _load_spec(self) -> SkillSpec:
         if self.skill_path:
-            return load_skill(self.skill_path)
+            spec = load_skill(self.skill_path)
+            if not spec.model_slot:
+                spec.model_slot = self.model_slot or ""
+            return spec
         inputs = {
             key: FieldSpec(name=key, description=text, required=False)
             for key, text in self.input_fields.items()
@@ -106,6 +118,7 @@ class BaseAgent:
             outputs=outputs,
             required_tools=list(self.required_tools),
             system_prompt=self.description,
+            model_slot=self.model_slot or "",
         )
 
     def bind(self, tool_entries: dict[str, Any], model: Any = None) -> "BaseAgent":

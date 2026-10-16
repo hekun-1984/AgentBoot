@@ -46,6 +46,30 @@ python main.py
 
 也可以在代码里把模型只交给某一层。`build_app(model=...)` 同时用于 Agent 和主图路由；`build_app(router=...)` 可以单独替换路由器。安全筛查和高危兜底仍然会执行。
 
+按用途配置多模型时，把表写到 YAML，并用 `AGENTBOOT_MODELS` 指向它。密钥放在环境变量里，配置只写变量名。每个槽位用 `default` 指定默认模型，其余按书写顺序作备选。Agent 在 `SKILL.md` 里写 `model: reason` 这类槽位名；不写就用 `general`。主图路由用 `route`，没配时改用 `general`。
+
+```yaml
+route:
+  default: fast-a
+  options:
+    - name: fast-a
+      provider: openai
+      model: gpt-4.1-mini
+      api_key_env: OPENAI_API_KEY
+    - name: fast-b
+      provider: dashscope
+      model: qwen-turbo
+      api_key_env: DASHSCOPE_API_KEY
+general:
+  options:
+    - name: main
+      provider: openai
+      model: gpt-4.1
+      api_key_env: OPENAI_API_KEY
+```
+
+内置槽位是 `route`、`general`、`extract`、`reason`、`vision`、`embed`、`rerank`。前五个是对话模型。`embed` 和 `rerank` 只给检索 Tool 用，通过 `catalog.embeddings()` 和 `catalog.reranker()` 调用。也可以增加自定义槽位名。
+
 ## 二次开发
 
 1. 新建业务包，用 `@tool` 写原子能力。函数签名就是输入，返回值就是输出。

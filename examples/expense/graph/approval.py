@@ -35,7 +35,7 @@ class ExpenseApprovalGraph(BaseGraph):
         return "没有形成可用回复。"
 
 
-def build_app(model=None, router=None, trace_sink=None) -> AgentBootApplication:
+def build_app(model=None, router=None, trace_sink=None, models=None) -> AgentBootApplication:
     """装配费用审批示例。不传模型时，Agent 与路由都走可重复的离线实现。"""
-    app = AgentBootApplication(model=model, router=router, trace_sink=trace_sink)
+    app = AgentBootApplication(model=model, router=router, trace_sink=trace_sink, models=models)
     return app.scan("expense")

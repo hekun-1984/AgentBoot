@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import os
 import pkgutil
+from pathlib import Path
 from typing import Any
 
 from agentboot.agent import BaseAgent
 from agentboot.audit import TraceSink, build_record, call_scope, new_call_id
 from agentboot.exceptions import RegistrationError
 from agentboot.graph import BaseGraph
+from agentboot.catalog import ModelCatalog
 from agentboot.llm import ChatModel, load_model
 from agentboot.registry import Registry
 from agentboot.subgraph import BaseSubgraph
@@ -98,11 +101,14 @@ class AgentBootApplication:
         router: Any = _UNSET,
         graph: str | None = None,
         trace_sink: TraceSink | None = None,
+        models: ModelCatalog | str | Path | dict | None = None,
     ) -> None:
         self.registry = Registry()
         self.graph_name = graph
         self.model = _resolve_model(model)
+        self._router_set = router is not _UNSET
         self.router = self.model if router is _UNSET else _resolve_model(router)
+        self.catalog = _resolve_catalog(models)
         self.trace_sink = trace_sink
         self._compiled: CompiledApplication | None = None
 
@@ -151,11 +157,12 @@ class AgentBootApplication:
 
         agents = {}
         for name, cls in self.registry.agents.items():
-            agents[name] = cls().bind(self.registry.tools, self.model)
+            agent = cls()
+            agents[name] = agent.bind(self.registry.tools, self._model_for(agent.spec.model_slot or "general"))
         subgraphs = {}
         for name, cls in self.registry.subgraphs.items():
             subgraphs[name] = cls().compile(agents, self.registry.tools)
-        graph = graph_cls().bind(subgraphs, self.registry.tools, self.router)
+        graph = graph_cls().bind(subgraphs, self.registry.tools, self._router_model())
         self._compiled = CompiledApplication(graph, agents, subgraphs, self.trace_sink)
         return self._compiled
 
@@ -170,3 +177,34 @@ class AgentBootApplication:
 
     def invoke_subgraph(self, name: str, context: dict | None = None, *, user_input: str = "") -> dict:
         return self.compile().invoke_subgraph(name, context, user_input=user_input)
+
+    def _model_for(self, slot: str) -> Any:
+        if self.catalog is None:
+            return self.model
+        return self.catalog.chat(slot)
+
+    def _router_model(self) -> Any:
+        if self._router_set:
+            return self.router
+        if self.catalog is None:
+            return self.model
+        if self.catalog.has("route"):
+            return self.catalog.chat("route")
+        if self.catalog.has("general"):
+            return self.catalog.chat("general")
+        return self.model
+
+
+def _resolve_catalog(models: ModelCatalog | str | Path | dict | None) -> ModelCatalog | None:
+    if isinstance(models, ModelCatalog):
+        return models
+    if isinstance(models, dict):
+        return ModelCatalog.parse(models)
+    if isinstance(models, (str, Path)) and str(models).strip():
+        return ModelCatalog.read(models)
+    if models is not None:
+        return None
+    path = os.getenv("AGENTBOOT_MODELS")
+    if path:
+        return ModelCatalog.read(path)
+    return None

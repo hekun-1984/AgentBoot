@@ -76,6 +76,9 @@ def message_brief(message: Any) -> dict:
             {"name": call.get("name"), "args": call.get("args"), "id": call.get("id")}
             for call in tool_calls
         ]
+    metadata = getattr(message, "response_metadata", None) or {}
+    if isinstance(metadata, dict) and metadata.get("model_option"):
+        brief["model_option"] = metadata["model_option"]
     status = getattr(message, "status", None)
     if status:
         brief["status"] = status
