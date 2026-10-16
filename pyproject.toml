@@ -20,11 +20,8 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["agentboot*", "diabetes*"]
-
-[tool.setuptools.package-data]
-diabetes = ["agent/*/SKILL.md"]
+include = ["agentboot*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = [".", "examples"]

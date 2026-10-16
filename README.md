@@ -15,6 +15,8 @@
 
 每个 Agent 都是一张独立的 LangGraph，可以单独 `invoke`。输入、输出、工具集、最大步数和失败策略写在该 Agent 目录的 `SKILL.md`。失败会标成 `llm`、`tool` 或 `state`。一次执行的 trace 里，Agent span 下面挂着每次模型调用和 Tool 调用，并带有执行前后的状态快照。
 
+接上真实模型时，结束回答会按 `SKILL.md` 的 `output` 字段调用 `with_structured_output`。类型和缺字段仍由运行时再检查一次。没有声明输出字段、或模型不提供结构化接口时，仍走原来的 JSON 文本。离线 `offline_step` 不走这条路径。
+
 `on_failure` 可以是 `return_partial`、`fallback`、`escalate` 或 `abort`。
 
 ## 糖尿病示例
@@ -49,12 +51,15 @@ python main.py
 1. 新建业务包，用 `@tool` 写原子能力。函数签名就是输入，返回值就是输出。
 2. 每个 Agent 一个目录：`SKILL.md` 写契约和系统提示词，`agent.py` 继承 `BaseAgent`。没有模型时实现 `offline_step`，有模型时同一张图会改为工具调用循环。
 3. 继承 `BaseSubgraph`。顺序流程填 `steps`；中间要插入 Tool 时覆盖 `build`，用 `add_edge` 把边写死。用 `writes` 列出允许写回主图的字段。
-4. 继承 `BaseGraph`，在 `subgraphs` 里列出白名单，设 `fallback_subgraph` 和 `max_steps`。需要规则兜底时指定 `critical_tool` 和 `emergency_subgraph`。
+4. 继承 `BaseGraph`，在 `subgraphs` 里列出白名单，设 `fallback_subgraph` 和 `max_steps`。需要按状态兜底时声明 `guard_field`、`guard_values` 和 `guard_subgraph`。路由前的规则检查写在 `screen()`。
 5. `AgentBootApplication().scan("你的包").invoke(问题, context)`。
 
 单独回归某一个 Agent：
 
 ```python
+import sys
+sys.path.insert(0, "examples")
+
 from diabetes import build_app
 
 app = build_app()
@@ -65,11 +70,24 @@ print(result.trace[0]["children"])
 
 `result.error_kind` 为 `llm` 表示模型决策或结构化输出失败，`tool` 表示工具抛错，`state` 表示声明的必填输入没有传到。
 
-业务包替换 `diabetes` 即可。`agentboot` 里没有糖尿病规则。
+`pip install` 的发布物只有 `agentboot`。`examples/diabetes` 和 `examples/expense` 留在仓库里，用来演示同一套契约，不进入框架安装包。本地运行和测试会把 `examples` 加进路径。
+
+## 费用审批示例
+
+这个示例不包含医疗规则。限额写在 `check_amount_policy` 里。主图声明 `decision` 为 `escalate` 或 `reject` 时进入 `expense_escalation`，空计划落到 `policy_reference`。
+
+```python
+import sys
+sys.path.insert(0, "examples")
+
+from expense import build_app
+
+print(build_app().invoke("这张办公费能报销吗？", {"expense_id": "e100"})["answer"])
+```
 
 ## 目录
 
-框架和示例都按四层分目录。`agentboot` 里同名目录是基类，`diabetes` 里同名目录是业务实现。注册、状态、追踪这些运行时文件留在 `agentboot` 根下，不属于某一层。
+`agentboot` 是可安装的框架。示例放在 `examples`，各自再按四层分目录。
 
 ```text
 agentboot/
@@ -79,9 +97,7 @@ agentboot/
 ├── graph/           # BaseGraph
 ├── application.py
 └── registry.py
-diabetes/
-├── tool/            # 档案、血糖、指南、危急值等原子能力
-├── agent/           # 每个 Agent 一个目录，旁边放 SKILL.md
-├── subgraph/        # risk_check、guideline_qa、management_plan、emergency
-└── graph/           # 主图 DiabetesAssistantGraph
+examples/
+├── diabetes/        # 医疗示例：档案、血糖、指南、危急值
+└── expense/         # 费用审批示例：读单、限额、升级、制度原文
 ```

@@ -204,3 +204,195 @@ def test_trace_sink_keeps_one_call_and_can_replay(tmp_path):
     stored = jsonl.read()
     assert stored[-1]["output"]["answer"] == first["answer"]
     assert stored[-1]["call_id"]
+
+
+def _typed_skill(tmp_path):
+    skill = tmp_path / "SKILL.md"
+    skill.write_text(
+        """---
+name: typed
+description: 校验输出
+tools: []
+max_steps: 2
+on_failure: return_partial
+input: {}
+output:
+  count:
+    type: int
+    description: 数量
+  label:
+    type: str
+    description: 标签
+---
+
+只输出声明的字段。
+""",
+        encoding="utf-8",
+    )
+    return skill
+
+
+def test_declared_output_is_requested_as_structured_schema(tmp_path):
+    skill = _typed_skill(tmp_path)
+
+    class Bound:
+        def __init__(self):
+            self.free_calls = 0
+            self.schemas = []
+
+        def invoke(self, messages, tools):
+            self.free_calls += 1
+            return AIMessage(content="不是 JSON")
+
+        def invoke_structured(self, messages, schema):
+            self.schemas.append(schema)
+            return {"count": 4, "label": "done"}
+
+    class Typed(BaseAgent):
+        name = "typed"
+        skill_path = str(skill)
+
+        def offline_step(self, messages, shared_context):
+            raise AssertionError("应走结构化输出")
+
+    model = Bound()
+    result = Typed().bind({}, model).invoke({}, user_input="count")
+    assert result.error is None
+    assert result.output == {"count": 4, "label": "done"}
+    assert model.free_calls == 0
+    fields = model.schemas[0].model_fields
+    assert fields["count"].annotation is int
+    assert fields["label"].annotation is str
+
+
+def test_structured_output_still_rejects_wrong_types(tmp_path):
+    skill = _typed_skill(tmp_path)
+
+    class Bound:
+        def invoke(self, messages, tools):
+            raise AssertionError("没有工具时不应自由生成")
+
+        def invoke_structured(self, messages, schema):
+            return {"count": "x", "label": "ok"}
+
+    class Typed(BaseAgent):
+        name = "typed"
+        skill_path = str(skill)
+
+        def offline_step(self, messages, shared_context):
+            raise AssertionError("应走结构化输出")
+
+    result = Typed().bind({}, Bound()).invoke({}, user_input="count")
+    assert result.error_kind == "llm"
+    assert "类型应为 int" in result.error
+
+
+def test_required_tool_finishes_through_structured_output():
+    @tool(name="ping", description="回声")
+    def ping(value: str) -> dict:
+        return {"value": value}
+
+    class Bound:
+        def __init__(self):
+            self.invokes = 0
+            self.structured = 0
+
+        def invoke(self, messages, tools):
+            self.invokes += 1
+            return AIMessage(content="", tool_calls=[{"name": "ping", "args": {"value": "ok"}, "id": "1"}])
+
+        def invoke_structured(self, messages, schema):
+            self.structured += 1
+            assert "text" in schema.model_fields
+            return {"text": "ok"}
+
+    class MustPing(BaseAgent):
+        name = "must_ping"
+        description = "必须先调用 ping"
+        tools = ["ping"]
+        required_tools = ["ping"]
+        max_steps = 3
+        output_fields = {"text": "文本"}
+
+        def offline_step(self, messages, shared_context):
+            raise AssertionError("应走脚本或结构化输出")
+
+    model = Bound()
+    result = MustPing().bind({"ping": ping.__agentboot_tool__}, model).invoke({}, user_input="go")
+    assert result.error is None
+    assert result.output["text"] == "ok"
+    assert model.invokes == 1
+    assert model.structured == 1
+
+
+def test_optional_tool_turn_is_followed_by_structured_output():
+    @tool(name="ping", description="回声")
+    def ping(value: str) -> dict:
+        return {"value": value}
+
+    class Bound:
+        def __init__(self):
+            self.invokes = 0
+            self.structured = 0
+
+        def invoke(self, messages, tools):
+            self.invokes += 1
+            return AIMessage(content="自由文本")
+
+        def invoke_structured(self, messages, schema):
+            self.structured += 1
+            return {"text": "from-schema"}
+
+    class OptionalPing(BaseAgent):
+        name = "optional_ping"
+        description = "可以调用 ping"
+        tools = ["ping"]
+        max_steps = 3
+        output_fields = {"text": "文本"}
+
+        def offline_step(self, messages, shared_context):
+            raise AssertionError("应走结构化输出")
+
+    model = Bound()
+    result = OptionalPing().bind({"ping": ping.__agentboot_tool__}, model).invoke({}, user_input="go")
+    assert result.error is None
+    assert result.output["text"] == "from-schema"
+    assert model.invokes == 1
+    assert model.structured == 1
+
+
+def test_langchain_adapter_calls_with_structured_output():
+    from agentboot.contract import output_model
+    from agentboot.llm import LangChainModel
+    from agentboot.models import FieldSpec
+
+    class Chat:
+        def __init__(self):
+            self.schema = None
+
+        def with_structured_output(self, schema):
+            self.schema = schema
+            return self
+
+        def invoke(self, messages):
+            return self.schema(count=2, label="ok")
+
+    chat = Chat()
+    schema = output_model(
+        "typed",
+        {
+            "count": FieldSpec("count", "int", "数量", required=True),
+            "label": FieldSpec("label", "str", "标签", required=True),
+        },
+    )
+    data = LangChainModel(chat).invoke_structured([], schema)
+    assert chat.schema is schema
+    assert data == {"count": 2, "label": "ok"}
+
+
+def test_distribution_contains_only_the_framework():
+    import tomllib
+    from pathlib import Path
+
+    data = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8"))
+    assert data["tool"]["setuptools"]["packages"]["find"]["include"] == ["agentboot*"]

@@ -9,12 +9,22 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 
-from agentboot.contract import output_problems
+from agentboot.contract import output_model, output_problems
 from agentboot.exceptions import AgentExecutionError, RegistrationError, SkillError
 from agentboot.models import AgentResult, FieldSpec, SkillSpec
 from agentboot.skill import load_skill
 from agentboot.state import AgentState
 from agentboot.tracing import message_brief, new_span, snapshot, start_timer, sum_tokens, usage_of
+
+
+def invoke_structured_message(model: Any, messages: list, spec: SkillSpec) -> AIMessage:
+    """让模型按 SKILL 的 output 字段返回对象，不再解析自由文本。"""
+    data = model.invoke_structured(messages, output_model(spec.name, spec.outputs))
+    if hasattr(data, "model_dump"):
+        data = data.model_dump()
+    if not isinstance(data, dict):
+        raise TypeError("结构化输出不是对象")
+    return AIMessage(content=json.dumps(data, ensure_ascii=False), additional_kwargs={"structured": True})
 
 
 def parse_json_object(content: str) -> dict:
@@ -145,20 +155,23 @@ class BaseAgent:
                 )
             return {"started_at": start_timer(), "state_before": before, "failed": False, "steps": 0}
 
-        def model_node(state: AgentState) -> dict:
-            if state.get("steps", 0) >= self.spec.max_steps:
-                return self._fail(state, f"{self.name} 超过最大步数 {self.spec.max_steps}", "llm")
-            started = start_timer()
-            messages = list(state.get("messages") or [])
-            try:
-                if selected is not None:
-                    ai_message = selected.invoke(messages, lc_tools)
-                else:
-                    ai_message = self.offline_step(messages, dict(state.get("shared_context") or {}))
-            except AgentExecutionError:
-                raise
-            except Exception as exc:
-                return self._fail(state, f"模型调用失败: {exc}", "llm")
+        def missing_required(state: AgentState) -> list[str]:
+            called = {
+                item.name
+                for item in state.get("messages") or []
+                if isinstance(item, ToolMessage) and getattr(item, "status", None) != "error" and item.name
+            }
+            return [name for name in self.spec.required_tools if name not in called]
+
+        def structured_available() -> bool:
+            return selected is not None and callable(getattr(selected, "invoke_structured", None)) and bool(self.spec.outputs)
+
+        def use_direct_structured(state: AgentState) -> bool:
+            if not structured_available() or missing_required(state):
+                return False
+            return not lc_tools or bool(self.spec.required_tools)
+
+        def accept_model(state: AgentState, ai_message: AIMessage, started: float, messages: list) -> dict:
             if not isinstance(ai_message, AIMessage):
                 ai_message = AIMessage(content=str(ai_message))
             unknown = [call["name"] for call in ai_message.tool_calls if call["name"] not in allowed]
@@ -184,6 +197,32 @@ class BaseAgent:
                 )
             return {"messages": [ai_message], "steps": state.get("steps", 0) + 1, "trace": trace}
 
+        def model_node(state: AgentState) -> dict:
+            if state.get("steps", 0) >= self.spec.max_steps:
+                return self._fail(state, f"{self.name} 超过最大步数 {self.spec.max_steps}", "llm")
+            started = start_timer()
+            messages = list(state.get("messages") or [])
+            try:
+                if use_direct_structured(state):
+                    ai_message = invoke_structured_message(selected, messages, self.spec)
+                elif selected is not None:
+                    ai_message = selected.invoke(messages, lc_tools)
+                else:
+                    ai_message = self.offline_step(messages, dict(state.get("shared_context") or {}))
+            except AgentExecutionError:
+                raise
+            except Exception as exc:
+                return self._fail(state, f"模型调用失败: {exc}", "llm")
+            return accept_model(state, ai_message, started, messages)
+
+        def needs_structured_followup(state: AgentState) -> bool:
+            if not structured_available() or not lc_tools or self.spec.required_tools or missing_required(state):
+                return False
+            last = (state.get("messages") or [None])[-1]
+            if isinstance(last, AIMessage) and (last.tool_calls or last.additional_kwargs.get("structured")):
+                return False
+            return True
+
         def route_after_model(state: AgentState) -> str:
             if state.get("failed"):
                 return END
@@ -192,15 +231,22 @@ class BaseAgent:
                 if tool_node is None:
                     return END
                 return "tools"
+            if needs_structured_followup(state):
+                return "finalize"
             return "gate"
 
-        def missing_required(state: AgentState) -> list[str]:
-            called = {
-                item.name
-                for item in state.get("messages") or []
-                if isinstance(item, ToolMessage) and getattr(item, "status", None) != "error" and item.name
-            }
-            return [name for name in self.spec.required_tools if name not in called]
+        def finalize(state: AgentState) -> dict:
+            if state.get("steps", 0) >= self.spec.max_steps:
+                return self._fail(state, f"{self.name} 超过最大步数 {self.spec.max_steps}", "llm")
+            started = start_timer()
+            messages = list(state.get("messages") or [])
+            try:
+                ai_message = invoke_structured_message(selected, messages, self.spec)
+            except AgentExecutionError:
+                raise
+            except Exception as exc:
+                return self._fail(state, f"模型调用失败: {exc}", "llm")
+            return accept_model(state, ai_message, started, messages)
 
         def gate(state: AgentState) -> dict:
             missing = missing_required(state)
@@ -287,6 +333,9 @@ class BaseAgent:
         if tool_node is not None:
             builder.add_node("tools", tool_node)
             builder.add_node("observe", observe)
+            if structured_available() and not self.spec.required_tools:
+                builder.add_node("finalize", finalize)
+                builder.add_edge("finalize", "gate")
             builder.add_conditional_edges("model", route_after_model)
             builder.add_edge("tools", "observe")
             builder.add_conditional_edges("observe", lambda state: END if state.get("failed") else "model")

@@ -28,7 +28,10 @@ class ScriptedModel:
 
 
 class LangChainModel:
-    """把 LangChain chat model 绑到 Agent 的工具白名单上。"""
+    """把 LangChain chat model 绑到 Agent 的工具白名单上。
+
+    结束回答时走 with_structured_output，schema 来自 SKILL 的 output 字段。
+    """
 
     def __init__(self, chat_model: Any) -> None:
         self.chat_model = chat_model
@@ -39,6 +42,18 @@ class LangChainModel:
         if isinstance(message, AIMessage):
             return message
         return AIMessage(content=getattr(message, "content", str(message)))
+
+    def invoke_structured(self, messages: list, schema: Any) -> dict:
+        result = self.chat_model.with_structured_output(schema).invoke(messages)
+        if hasattr(result, "model_dump"):
+            data = result.model_dump()
+        elif isinstance(result, dict):
+            data = result
+        else:
+            raise TypeError("结构化输出不是对象")
+        if not isinstance(data, dict):
+            raise TypeError("结构化输出不是对象")
+        return data
 
 
 def load_model(model_name: str | None = None) -> ChatModel | None:
