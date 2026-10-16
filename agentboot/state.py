@@ -16,6 +16,7 @@ def merge_dict(left: dict | None, right: dict | None) -> dict:
 
 class AgentState(TypedDict, total=False):
     messages: Annotated[list[AnyMessage], add_messages]
+    user_input: str
     shared_context: dict
     output: dict
     steps: int
@@ -33,7 +34,11 @@ class SubgraphState(TypedDict, total=False):
     shared_context: dict
     output: dict
     trace: Annotated[list, operator.add]
+    inner_trace: Annotated[list, operator.add]
     errors: Annotated[list, operator.add]
+    results: dict
+    blocked: bool
+    started_at: float
 
 
 class GraphState(TypedDict, total=False):

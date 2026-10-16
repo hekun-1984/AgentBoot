@@ -201,68 +201,14 @@ class BaseGraph:
             context = dict(state.get("shared_context") or {})
             return [
                 Send(
-                    "run_subgraph",
+                    name,
                     {
-                        "target": name,
                         "user_input": state.get("user_input"),
                         "shared_context": context,
                     },
                 )
                 for name in waves[index]
             ]
-
-        def run_subgraph(state: GraphState) -> dict:
-            name = str(state.get("target") or "")
-            started = start_timer()
-            before = snapshot(state.get("shared_context") or {})
-            compiled = self._compiled_subgraphs[name]
-            try:
-                out = compiled.invoke(
-                    {
-                        "user_input": state.get("user_input") or "",
-                        "shared_context": dict(state.get("shared_context") or {}),
-                        "output": {},
-                        "trace": [],
-                        "errors": [],
-                    }
-                )
-            except Exception as exc:
-                span = new_span(
-                    kind="subgraph",
-                    name=name,
-                    span_input=before,
-                    span_output={"error": str(exc)},
-                    started=started,
-                    error=str(exc),
-                    error_kind="subgraph",
-                    state_before=before,
-                    state_after=before,
-                )
-                return {
-                    "results": {name: {"error": str(exc)}},
-                    "errors": [{"source": name, "message": str(exc), "error_kind": "subgraph"}],
-                    "trace": [span],
-                }
-            context = dict(out.get("shared_context") or {})
-            published = {key: context[key] for key in compiled.writes if key in context}
-            span = new_span(
-                kind="subgraph",
-                name=name,
-                span_input=before,
-                span_output=out.get("output"),
-                started=started,
-                state_before=before,
-                state_after=context,
-                children=list(out.get("trace") or []),
-                error=None if not out.get("errors") else out["errors"][0].get("message"),
-                error_kind=None if not out.get("errors") else out["errors"][0].get("error_kind"),
-            )
-            return {
-                "results": {name: dict(out.get("output") or {})},
-                "shared_context": published,
-                "trace": [span],
-                "errors": list(out.get("errors") or []),
-            }
 
         def join(state: GraphState) -> dict:
             return {
@@ -337,15 +283,16 @@ class BaseGraph:
         builder.add_node("safety", safety)
         builder.add_node("route", route)
         builder.add_node("fanout", lambda state: {})
-        builder.add_node("run_subgraph", run_subgraph)
         builder.add_node("join", join)
         builder.add_node("guard", guard)
         builder.add_node("aggregate", aggregate)
+        for name, compiled in self._compiled_subgraphs.items():
+            builder.add_node(name, compiled.graph)
+            builder.add_edge(name, "join")
         builder.add_edge(START, "safety")
         builder.add_edge("safety", "route")
         builder.add_edge("route", "fanout")
-        builder.add_conditional_edges("fanout", fanout, ["run_subgraph", "guard"])
-        builder.add_edge("run_subgraph", "join")
+        builder.add_conditional_edges("fanout", fanout, [*self.subgraphs, "guard"])
         builder.add_edge("join", "fanout")
         if self.pause_for_human:
             builder.add_node("wait", wait)

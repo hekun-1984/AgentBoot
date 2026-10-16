@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "examples"))
 
-from diabetes import build_app
+from examples.diabetes import build_app
 
 
 def main() -> None:

@@ -119,7 +119,8 @@ def test_agent_and_subgraph_can_run_alone():
     )
     assert subgraph_result["shared_context"]["compliance_passed"] is True
     assert "胃肠道" in subgraph_result["shared_context"]["guideline_answer"]
-    assert subgraph_result["trace"][0]["kind"] == "agent"
+    assert subgraph_result["trace"][0]["kind"] == "subgraph"
+    assert subgraph_result["trace"][0]["children"][0]["kind"] == "agent"
 
 
 def test_guideline_search_uses_embed_then_rerank():

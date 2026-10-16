@@ -75,7 +75,7 @@ general:
 2. 每个 Agent 一个目录：`SKILL.md` 写契约和系统提示词，`agent.py` 继承 `BaseAgent`。没有模型时实现 `offline_step`，有模型时同一张图会改为工具调用循环。
 3. 继承 `BaseSubgraph`。顺序流程填 `steps`；中间要插入 Tool 时覆盖 `build`，用 `add_edge` 把边写死。用 `writes` 列出允许写回主图的字段。
 4. 继承 `BaseGraph`，在 `subgraphs` 里列出白名单，设 `fallback_subgraph` 和 `max_steps`。需要按状态兜底时声明 `guard_field`、`guard_values` 和 `guard_subgraph`。若要先等人决定再进入兜底子图，把 `pause_for_human` 设为真。路由前的规则检查写在 `screen()`。
-5. `AgentBootApplication().scan("你的包").invoke(问题, context)`。暂停时返回 `status=waiting_human` 和 `run_id`，用 `resume(run_id, decision)` 从停下的位置继续。
+5. `AgentBootApplication().scan("你的包").invoke(问题, context)`。要在重启后继续，传入 `open_postgres_checkpointer(连接串)`。表由 LangGraph 创建。`invoke(..., run_id=编号)` 开始一次流程，`continue_run(编号)` 从最后完成的一步继续，`resume(编号, decision)` 提交人的补充或决定。Tool、Agent 或子图里需要等人时调用 `wait_for_human`。
 
 单独回归某一个 Agent：
 

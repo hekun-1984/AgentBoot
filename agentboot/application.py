@@ -16,6 +16,7 @@ from agentboot.audit import TraceSink, build_record, call_scope, new_call_id
 from agentboot.exceptions import ConfigurationError, RegistrationError
 from agentboot.graph import BaseGraph
 from agentboot.catalog import ModelCatalog, use_catalog
+from agentboot.checkpoint import DURABILITY
 from agentboot.llm import ChatModel, load_model
 from agentboot.registry import Registry
 from agentboot.subgraph import BaseSubgraph
@@ -36,12 +37,22 @@ class CompiledApplication:
         self.compiled = graph.graph
         self.trace_sink = trace_sink
 
-    def invoke(self, user_input: str, context: dict | None = None, *, trace_sink: TraceSink | None = None) -> dict:
+    def invoke(
+        self,
+        user_input: str,
+        context: dict | None = None,
+        *,
+        trace_sink: TraceSink | None = None,
+        run_id: str | None = None,
+    ) -> dict:
         initial = dict(context or {})
         shared = dict(initial)
         shared.setdefault("user_input", user_input)
         call_id = new_call_id()
-        run_id = new_call_id() if self.graph.checkpointer is not None else None
+        if self.graph.checkpointer is not None:
+            run_id = run_id or new_call_id()
+        else:
+            run_id = None
         config = {"configurable": {"thread_id": run_id}} if run_id else None
         payload = {
             "user_input": user_input,
@@ -53,7 +64,10 @@ class CompiledApplication:
             "step_count": 0,
         }
         with call_scope(call_id):
-            state = self.compiled.invoke(payload) if config is None else self.compiled.invoke(payload, config)
+            if config is None:
+                state = self.compiled.invoke(payload)
+            else:
+                state = self.compiled.invoke(payload, config, durability=DURABILITY)
         return self._finish(
             state,
             config=config,
@@ -70,7 +84,7 @@ class CompiledApplication:
         call_id = new_call_id()
         config = {"configurable": {"thread_id": run_id}}
         with call_scope(call_id):
-            state = self.compiled.invoke(Command(resume=decision), config)
+            state = self.compiled.invoke(Command(resume=decision), config, durability=DURABILITY)
         user_input = str((self._checkpoint_values(config) or {}).get("user_input") or "")
         return self._finish(
             state,
@@ -113,7 +127,7 @@ class CompiledApplication:
             )
         call_id = new_call_id()
         with call_scope(call_id):
-            state = self.compiled.invoke(None, config)
+            state = self.compiled.invoke(None, config, durability=DURABILITY)
         return self._finish(
             state,
             config=config,
@@ -307,8 +321,15 @@ class AgentBootApplication:
         self._compiled = CompiledApplication(graph, agents, subgraphs, self.trace_sink)
         return self._compiled
 
-    def invoke(self, user_input: str, context: dict | None = None, *, trace_sink: TraceSink | None = None) -> dict:
-        return self.compile().invoke(user_input, context, trace_sink=trace_sink)
+    def invoke(
+        self,
+        user_input: str,
+        context: dict | None = None,
+        *,
+        trace_sink: TraceSink | None = None,
+        run_id: str | None = None,
+    ) -> dict:
+        return self.compile().invoke(user_input, context, trace_sink=trace_sink, run_id=run_id)
 
     def resume(self, run_id: str, decision: Any, *, trace_sink: TraceSink | None = None) -> dict:
         return self.compile().resume(run_id, decision, trace_sink=trace_sink)

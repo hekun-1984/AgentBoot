@@ -149,13 +149,20 @@ class BaseAgent:
 
         def prepare(state: AgentState) -> dict:
             context = dict(state.get("shared_context") or {})
+            seeded: dict = {}
+            if not state.get("messages"):
+                text = str(state.get("user_input") or "")
+                seeded["messages"] = [
+                    SystemMessage(content=self.spec.system_prompt or self.spec.description),
+                    HumanMessage(content=text),
+                ]
             missing = [
                 field.name
                 for field in self.spec.inputs.values()
                 if field.required and field.name != "user_input" and context.get(field.name) in (None, "")
             ]
             user_required = self.spec.inputs.get("user_input")
-            user_text = _user_text(state.get("messages") or [])
+            user_text = _user_text(list(state.get("messages") or []) + list(seeded.get("messages") or []))
             if user_required and user_required.required and not user_text:
                 missing.append("user_input")
             before = snapshot(context)
@@ -166,7 +173,7 @@ class BaseAgent:
                     "state",
                     state_before=before,
                 )
-            return {"started_at": start_timer(), "state_before": before, "failed": False, "steps": 0}
+            return {**seeded, "started_at": start_timer(), "state_before": before, "failed": False, "steps": 0}
 
         def missing_required(state: AgentState) -> list[str]:
             called = {
