@@ -1,6 +1,7 @@
 ---
 name: patient_data
 description: 从对话和系统中提取患者信息，补齐缺失字段
+model: general
 tools:
   - get_patient_profile
   - get_glucose_records

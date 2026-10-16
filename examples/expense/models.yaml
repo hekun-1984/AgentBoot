@@ -1,0 +1,42 @@
+# 费用审批案例使用的模型表。
+# set AGENTBOOT_MODELS=examples/expense/models.yaml
+# 限额判断 Agent 使用 reason，读单和登记使用 general。
+# 制度原文在配置了 rerank 时按问题重排条款，不改限额文字。
+
+route:
+  default: fast-a
+  options:
+    - name: fast-a
+      provider: openai
+      model: gpt-4.1-mini
+      api_key_env: OPENAI_API_KEY
+    - name: fast-b
+      provider: dashscope
+      model: qwen-turbo
+      api_key_env: DASHSCOPE_API_KEY
+
+general:
+  options:
+    - name: main
+      provider: openai
+      model: gpt-4.1
+      api_key_env: OPENAI_API_KEY
+
+reason:
+  default: deep
+  options:
+    - name: deep
+      provider: openai
+      model: gpt-4.1
+      api_key_env: OPENAI_API_KEY
+    - name: deep-backup
+      provider: dashscope
+      model: qwen-max
+      api_key_env: DASHSCOPE_API_KEY
+
+rerank:
+  options:
+    - name: ranker
+      provider: cohere
+      model: rerank-v3.5
+      api_key_env: COHERE_API_KEY

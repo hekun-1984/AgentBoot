@@ -338,3 +338,19 @@ output:
         encoding="utf-8",
     )
     assert load_skill(skill).model_slot == "extract"
+
+
+def test_shipped_model_examples_parse():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "examples"
+    shared = ModelCatalog.read(root / "models.yaml")
+    diabetes = ModelCatalog.read(root / "diabetes" / "models.yaml")
+    expense = ModelCatalog.read(root / "expense" / "models.yaml")
+    assert set(shared.slots) == {"route", "general", "extract", "reason", "vision", "embed", "rerank"}
+    assert shared.slots["route"].default == "fast-a"
+    assert [item.name for item in shared.slots["route"].ordered()] == ["fast-a", "fast-b"]
+    assert diabetes.slots["reason"].default == "deep"
+    assert "embed" in diabetes.slots and "rerank" in diabetes.slots
+    assert expense.slots["reason"].kind == "chat"
+    assert expense.slots["rerank"].kind == "rerank"

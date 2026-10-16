@@ -1,6 +1,7 @@
 ---
 name: followup
 description: 制定复查计划并发送提醒，高危时记录风险事件
+model: general
 tools:
   - get_medication_plan
   - send_followup_reminder

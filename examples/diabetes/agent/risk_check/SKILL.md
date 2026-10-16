@@ -1,6 +1,7 @@
 ---
 name: risk_check
 description: 判断当前指标是否高危，并给出风险等级
+model: reason
 tools:
   - check_critical_value
   - query_guideline_rag

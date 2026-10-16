@@ -1,6 +1,7 @@
 ---
 name: expense_reader
 description: 读取报销单上的金额、类别和事由
+model: general
 tools:
   - get_expense
 required_tools:

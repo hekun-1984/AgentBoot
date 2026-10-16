@@ -1,0 +1,62 @@
+# 模型表示例。复制后把 AGENTBOOT_MODELS 指到本文件。
+# 密钥写在环境变量里，不要写进这个文件。
+# 每个槽位的 default 是默认模型，其余按书写顺序在默认模型不可用时接替。
+
+route:
+  default: fast-a
+  options:
+    - name: fast-a
+      provider: openai
+      model: gpt-4.1-mini
+      api_key_env: OPENAI_API_KEY
+    - name: fast-b
+      provider: dashscope
+      model: qwen-turbo
+      api_key_env: DASHSCOPE_API_KEY
+
+general:
+  options:
+    - name: main
+      provider: openai
+      model: gpt-4.1
+      api_key_env: OPENAI_API_KEY
+
+extract:
+  options:
+    - name: forms
+      provider: openai
+      model: gpt-4.1-mini
+      api_key_env: OPENAI_API_KEY
+
+reason:
+  default: deep
+  options:
+    - name: deep
+      provider: openai
+      model: gpt-4.1
+      api_key_env: OPENAI_API_KEY
+    - name: deep-backup
+      provider: dashscope
+      model: qwen-max
+      api_key_env: DASHSCOPE_API_KEY
+
+vision:
+  options:
+    - name: eyes
+      provider: openai
+      model: gpt-4.1
+      api_key_env: OPENAI_API_KEY
+
+embed:
+  options:
+    - name: vectors
+      provider: openai
+      model: text-embedding-3-small
+      api_key_env: OPENAI_API_KEY
+
+rerank:
+  options:
+    - name: ranker
+      provider: cohere
+      model: rerank-v3.5
+      api_key_env: COHERE_API_KEY

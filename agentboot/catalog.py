@@ -274,3 +274,21 @@ def _normalize_rerank(raw: object) -> list[dict]:
         score = getattr(item, "relevance_score", getattr(item, "score", 0))
         ranked.append({"index": int(position), "score": float(score)})
     return ranked
+
+
+_active: ModelCatalog | None = None
+
+
+def use_catalog(catalog: ModelCatalog | None) -> None:
+    """让 Tool 读到当前这次装配的模型表。没有表时检索走原来的规则。"""
+    global _active
+    _active = catalog
+
+
+def current_catalog() -> ModelCatalog | None:
+    if _active is not None:
+        return _active
+    path = os.getenv("AGENTBOOT_MODELS")
+    if not path:
+        return None
+    return ModelCatalog.read(path)

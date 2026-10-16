@@ -1,6 +1,7 @@
 ---
 name: diet_advice
 description: 结合血糖和病史生成饮食建议
+model: general
 tools:
   - generate_diet_suggestion
   - query_guideline_rag

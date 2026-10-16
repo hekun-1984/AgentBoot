@@ -3,8 +3,16 @@
 from __future__ import annotations
 
 from agentboot import tool
+from agentboot.catalog import current_catalog
+from agentboot.exceptions import ConfigurationError
 
 from expense.tool.store import STORE
+
+POLICY_CLAUSES = (
+    "办公费两万元以内可直接通过。",
+    "招待费超过五千元，或其他费用超过两万元，必须升级审批。",
+    "超过十万元不予通过。",
+)
 
 
 @tool(name="get_expense", description="按报销单号读取金额、类别和事由")
@@ -43,7 +51,18 @@ def record_escalation(expense_id: str, decision: str, reason: str) -> dict:
 
 @tool(name="lookup_policy_text", description="返回报销制度原文，不根据问题改写限额")
 def lookup_policy_text(topic: str = "") -> dict:
-    return {
-        "topic": topic,
-        "text": "办公费两万元以内可直接通过。招待费超过五千元，或其他费用超过两万元，必须升级审批。超过十万元不予通过。",
-    }
+    clauses = list(POLICY_CLAUSES)
+    catalog = current_catalog()
+    if catalog is not None and catalog.has("rerank"):
+        try:
+            ranked = catalog.reranker().rerank(topic or "报销制度", clauses)
+            ordered = [
+                clauses[item["index"]]
+                for item in sorted(ranked, key=lambda item: item["score"], reverse=True)
+                if 0 <= item["index"] < len(clauses)
+            ]
+            if ordered:
+                clauses = ordered
+        except ConfigurationError:
+            clauses = list(POLICY_CLAUSES)
+    return {"topic": topic, "text": "".join(clauses)}

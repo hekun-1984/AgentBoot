@@ -1,6 +1,7 @@
 ---
 name: policy_check
 description: 按制度给出通过、升级或拒绝
+model: reason
 tools:
   - check_amount_policy
 required_tools:

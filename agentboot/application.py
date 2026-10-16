@@ -13,7 +13,7 @@ from agentboot.agent import BaseAgent
 from agentboot.audit import TraceSink, build_record, call_scope, new_call_id
 from agentboot.exceptions import RegistrationError
 from agentboot.graph import BaseGraph
-from agentboot.catalog import ModelCatalog
+from agentboot.catalog import ModelCatalog, use_catalog
 from agentboot.llm import ChatModel, load_model
 from agentboot.registry import Registry
 from agentboot.subgraph import BaseSubgraph
@@ -109,6 +109,7 @@ class AgentBootApplication:
         self._router_set = router is not _UNSET
         self.router = self.model if router is _UNSET else _resolve_model(router)
         self.catalog = _resolve_catalog(models)
+        use_catalog(self.catalog)
         self.trace_sink = trace_sink
         self._compiled: CompiledApplication | None = None
 

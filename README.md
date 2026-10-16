@@ -70,6 +70,8 @@ general:
 
 内置槽位是 `route`、`general`、`extract`、`reason`、`vision`、`embed`、`rerank`。前五个是对话模型。`embed` 和 `rerank` 只给检索 Tool 用，通过 `catalog.embeddings()` 和 `catalog.reranker()` 调用。也可以增加自定义槽位名。
 
+完整示例在 `examples/models.yaml`。糖尿病案例使用 `examples/diabetes/models.yaml`：风险评估走 `reason`，其余对话 Agent 走 `general`，指南检索在配了 `embed` 和 `rerank` 时改走向量和精排。费用审批使用 `examples/expense/models.yaml`：限额判断走 `reason`，制度条款在配了 `rerank` 时按问题重排。
+
 ## 二次开发
 
 1. 新建业务包，用 `@tool` 写原子能力。函数签名就是输入，返回值就是输出。

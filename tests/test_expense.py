@@ -34,3 +34,21 @@ def test_review_refuses_to_start_without_expense_id():
     blocked = build_app().invoke_subgraph("expense_review", {}, user_input="帮我报销")
     assert blocked["errors"][0]["error_kind"] == "state"
     assert "expense_id" in blocked["errors"][0]["message"]
+
+
+def test_policy_text_is_reranked_when_the_slot_is_configured():
+    from agentboot import ModelCatalog
+    from agentboot.catalog import RerankClient, use_catalog
+    from expense.agent.policy_check.agent import PolicyCheckAgent
+    from expense.tool.definitions import lookup_policy_text
+
+    class Rank:
+        def rerank(self, query, documents):
+            last = len(documents) - 1
+            return [{"index": last, "score": 1.0}] + [{"index": index, "score": 0.0} for index in range(last)]
+
+    use_catalog(ModelCatalog().bind("rerank", RerankClient([("ranker", Rank())])))
+    text = lookup_policy_text("报销限额")["text"]
+    assert text.startswith("超过十万元不予通过")
+    assert "招待费超过五千元" in text
+    assert PolicyCheckAgent().spec.model_slot == "reason"

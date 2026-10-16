@@ -1,6 +1,7 @@
 ---
 name: guideline_qa
 description: 基于指南回答糖尿病问题，超出范围时明确拒绝
+model: general
 tools:
   - query_guideline_rag
 required_tools:

@@ -1,7 +1,13 @@
 """本地运行糖尿病管理助手。
 
-设置 AGENTBOOT_MODEL（例如 openai:gpt-4o-mini）后，路由和 Agent 会改走该模型。
-未设置时使用离线契约实现，方便没有密钥时开发和回归。
+未设置模型时使用离线契约实现。要换真实模型，二选一：
+
+  set AGENTBOOT_MODEL=openai:gpt-4o-mini
+
+或使用案例里的模型表（密钥放在环境变量里）：
+
+  set AGENTBOOT_MODELS=examples/diabetes/models.yaml
+  set OPENAI_API_KEY=...
 """
 
 import os

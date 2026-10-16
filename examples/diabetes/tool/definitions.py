@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 
 from agentboot import tool
+from agentboot.catalog import current_catalog
+from agentboot.exceptions import ConfigurationError
 from diabetes.tool.store import STORE
 
 GUIDELINES = [
@@ -72,8 +74,45 @@ def get_medication_plan(patient_id: str) -> dict:
     return {"patient_id": patient_id, "medications": [dict(item) for item in STORE.medications.get(patient_id, [])]}
 
 
+def _public_chunks(chunks: list[dict]) -> list[dict]:
+    return [{"id": chunk["id"], "title": chunk["title"], "excerpt": chunk["excerpt"]} for chunk in chunks]
+
+
+def _cosine(left: list[float], right: list[float]) -> float:
+    dot = sum(a * b for a, b in zip(left, right))
+    left_norm = sum(a * a for a in left) ** 0.5
+    right_norm = sum(b * b for b in right) ** 0.5
+    if left_norm == 0 or right_norm == 0:
+        return 0.0
+    return dot / (left_norm * right_norm)
+
+
+def _guideline_by_models(catalog, question: str, top_k: int) -> dict:
+    texts = [question] + [chunk["excerpt"] for chunk in GUIDELINES]
+    vectors = catalog.embeddings().embed(texts)
+    scored = [(_cosine(vectors[0], vector), chunk) for vector, chunk in zip(vectors[1:], GUIDELINES)]
+    scored.sort(key=lambda item: item[0], reverse=True)
+    picked = [chunk for _, chunk in scored[: max(top_k, 1)]]
+    if catalog.has("rerank") and picked:
+        ranked = catalog.reranker().rerank(question, [chunk["excerpt"] for chunk in picked])
+        order = [
+            item["index"]
+            for item in sorted(ranked, key=lambda item: item["score"], reverse=True)
+            if 0 <= item["index"] < len(picked)
+        ]
+        if order:
+            picked = [picked[index] for index in order]
+    return {"question": question, "chunks": _public_chunks(picked)}
+
+
 @tool(name="query_guideline_rag", description="检索糖尿病指南片段，并返回来源")
 def query_guideline_rag(question: str, top_k: int = 3) -> dict:
+    catalog = current_catalog()
+    if catalog is not None and catalog.has("embed"):
+        try:
+            return _guideline_by_models(catalog, question, top_k)
+        except ConfigurationError:
+            pass
     text = (question or "").lower()
     scored = []
     for chunk in GUIDELINES:
@@ -81,11 +120,7 @@ def query_guideline_rag(question: str, top_k: int = 3) -> dict:
         if score:
             scored.append((score, chunk))
     scored.sort(key=lambda item: item[0], reverse=True)
-    chunks = [
-        {"id": chunk["id"], "title": chunk["title"], "excerpt": chunk["excerpt"]}
-        for _, chunk in scored[: max(top_k, 1)]
-    ]
-    return {"question": question, "chunks": chunks}
+    return {"question": question, "chunks": _public_chunks([chunk for _, chunk in scored[: max(top_k, 1)]])}
 
 
 @tool(name="check_critical_value", description="按固定阈值判断血糖是否危急，不依赖模型自由发挥")

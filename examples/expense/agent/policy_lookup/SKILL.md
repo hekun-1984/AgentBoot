@@ -1,6 +1,7 @@
 ---
 name: policy_lookup
 description: 引用报销制度原文
+model: general
 tools:
   - lookup_policy_text
 required_tools:

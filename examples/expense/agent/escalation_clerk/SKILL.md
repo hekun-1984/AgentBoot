@@ -1,6 +1,7 @@
 ---
 name: escalation_clerk
 description: 把超限单据登记为升级单
+model: general
 tools:
   - record_escalation
 required_tools:

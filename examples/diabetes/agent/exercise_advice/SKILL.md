@@ -1,6 +1,7 @@
 ---
 name: exercise_advice
 description: 结合风险状态生成运动建议
+model: general
 tools:
   - generate_exercise_suggestion
   - check_critical_value

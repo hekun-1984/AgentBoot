@@ -120,3 +120,30 @@ def test_agent_and_subgraph_can_run_alone():
     assert subgraph_result["shared_context"]["compliance_passed"] is True
     assert "胃肠道" in subgraph_result["shared_context"]["guideline_answer"]
     assert subgraph_result["trace"][0]["kind"] == "agent"
+
+
+def test_guideline_search_uses_embed_then_rerank():
+    from agentboot import ModelCatalog
+    from agentboot.catalog import EmbeddingClient, RerankClient, use_catalog
+    from diabetes.agent.guideline_qa.agent import GuidelineQAAgent
+    from diabetes.agent.risk_check.agent import RiskCheckAgent
+    from diabetes.tool.definitions import query_guideline_rag
+
+    class Vectors:
+        def embed_documents(self, texts):
+            return [[1.0, 0.0] if "运动" in text else [0.0, 1.0] for text in texts]
+
+    class Rank:
+        def rerank(self, query, documents):
+            last = len(documents) - 1
+            return [{"index": last, "score": 1.0}] + [{"index": index, "score": 0.0} for index in range(last)]
+
+    use_catalog(
+        ModelCatalog()
+        .bind("embed", EmbeddingClient([("vectors", Vectors())]))
+        .bind("rerank", RerankClient([("ranker", Rank())]))
+    )
+    chunks = query_guideline_rag("今天适合运动吗")["chunks"]
+    assert chunks[0]["id"] == "metformin-safety"
+    assert RiskCheckAgent().spec.model_slot == "reason"
+    assert GuidelineQAAgent().spec.model_slot == "general"
