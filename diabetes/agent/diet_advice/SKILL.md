@@ -4,6 +4,8 @@ description: 结合血糖和病史生成饮食建议
 tools:
   - generate_diet_suggestion
   - query_guideline_rag
+required_tools:
+  - generate_diet_suggestion
 max_steps: 4
 on_failure: return_partial
 input:

@@ -4,6 +4,8 @@ description: 结合风险状态生成运动建议
 tools:
   - generate_exercise_suggestion
   - check_critical_value
+required_tools:
+  - generate_exercise_suggestion
 max_steps: 4
 on_failure: return_partial
 input:

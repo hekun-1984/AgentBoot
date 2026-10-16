@@ -8,7 +8,7 @@ from agentboot import BaseSubgraph
 class DiabetesManagementPlanSubgraph(BaseSubgraph):
     name = "diabetes_management_plan"
     description = "按固定顺序生成饮食建议、运动建议和复查提醒，并汇总成管理计划。"
-    reads = ["patient_id", "user_input", "mentioned_glucose"]
+    reads = ["patient_id", "user_input"]
     writes = [
         "patient_profile",
         "glucose_records",

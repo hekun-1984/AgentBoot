@@ -25,6 +25,7 @@ class AgentState(TypedDict, total=False):
     trace: list
     started_at: float
     state_before: dict
+    awaiting_required_tools: bool
 
 
 class SubgraphState(TypedDict, total=False):

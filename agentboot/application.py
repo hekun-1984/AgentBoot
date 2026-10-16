@@ -8,6 +8,7 @@ import pkgutil
 from typing import Any
 
 from agentboot.agent import BaseAgent
+from agentboot.audit import TraceSink, build_record, call_scope, new_call_id
 from agentboot.exceptions import RegistrationError
 from agentboot.graph import BaseGraph
 from agentboot.llm import ChatModel, load_model
@@ -17,27 +18,46 @@ from agentboot.tool import ToolEntry
 
 
 class CompiledApplication:
-    def __init__(self, graph: BaseGraph, agents: dict[str, BaseAgent], subgraphs: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        graph: BaseGraph,
+        agents: dict[str, BaseAgent],
+        subgraphs: dict[str, Any],
+        trace_sink: TraceSink | None = None,
+    ) -> None:
         self.graph = graph
         self.agents = agents
         self.subgraphs = subgraphs
         self.compiled = graph.graph
+        self.trace_sink = trace_sink
 
-    def invoke(self, user_input: str, context: dict | None = None) -> dict:
-        shared = dict(context or {})
+    def invoke(self, user_input: str, context: dict | None = None, *, trace_sink: TraceSink | None = None) -> dict:
+        initial = dict(context or {})
+        shared = dict(initial)
         shared.setdefault("user_input", user_input)
-        state = self.compiled.invoke(
-            {
-                "user_input": user_input,
-                "shared_context": shared,
-                "results": {},
-                "trace": [],
-                "errors": [],
-                "wave_index": 0,
-                "step_count": 0,
-            }
-        )
-        return dict(state.get("final_output") or {})
+        call_id = new_call_id()
+        with call_scope(call_id):
+            state = self.compiled.invoke(
+                {
+                    "user_input": user_input,
+                    "shared_context": shared,
+                    "results": {},
+                    "trace": [],
+                    "errors": [],
+                    "wave_index": 0,
+                    "step_count": 0,
+                }
+            )
+        final = dict(state.get("final_output") or {})
+        final["call_id"] = call_id
+        record = build_record(call_id=call_id, user_input=user_input, context=initial, output=final)
+        sink = self.trace_sink if trace_sink is None else trace_sink
+        if sink is not None:
+            sink.write(record)
+        return final
+
+    def replay(self, record: dict, *, trace_sink: TraceSink | None = None) -> dict:
+        return self.invoke(str(record.get("user_input") or ""), dict(record.get("context") or {}), trace_sink=trace_sink)
 
     def invoke_agent(self, name: str, context: dict | None = None, *, user_input: str = "") -> Any:
         if name not in self.agents:
@@ -77,11 +97,13 @@ class AgentBootApplication:
         model: ChatModel | str | None = None,
         router: Any = _UNSET,
         graph: str | None = None,
+        trace_sink: TraceSink | None = None,
     ) -> None:
         self.registry = Registry()
         self.graph_name = graph
         self.model = _resolve_model(model)
         self.router = self.model if router is _UNSET else _resolve_model(router)
+        self.trace_sink = trace_sink
         self._compiled: CompiledApplication | None = None
 
     def include(self, *components: object) -> "AgentBootApplication":
@@ -134,11 +156,14 @@ class AgentBootApplication:
         for name, cls in self.registry.subgraphs.items():
             subgraphs[name] = cls().compile(agents, self.registry.tools)
         graph = graph_cls().bind(subgraphs, self.registry.tools, self.router)
-        self._compiled = CompiledApplication(graph, agents, subgraphs)
+        self._compiled = CompiledApplication(graph, agents, subgraphs, self.trace_sink)
         return self._compiled
 
-    def invoke(self, user_input: str, context: dict | None = None) -> dict:
-        return self.compile().invoke(user_input, context)
+    def invoke(self, user_input: str, context: dict | None = None, *, trace_sink: TraceSink | None = None) -> dict:
+        return self.compile().invoke(user_input, context, trace_sink=trace_sink)
+
+    def replay(self, record: dict, *, trace_sink: TraceSink | None = None) -> dict:
+        return self.compile().replay(record, trace_sink=trace_sink)
 
     def invoke_agent(self, name: str, context: dict | None = None, *, user_input: str = ""):
         return self.compile().invoke_agent(name, context, user_input=user_input)

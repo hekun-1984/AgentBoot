@@ -8,7 +8,7 @@ from agentboot import BaseSubgraph
 class EmergencyEscalationSubgraph(BaseSubgraph):
     name = "emergency_escalation"
     description = "血糖危急或出现胸痛、昏迷、严重低血糖时记录事件并转人工。不调整药物。"
-    reads = ["patient_id", "user_input", "mentioned_glucose"]
+    reads = ["patient_id", "user_input"]
     writes = [
         "risk_level",
         "risk_reason",

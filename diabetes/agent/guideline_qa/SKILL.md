@@ -3,6 +3,8 @@ name: guideline_qa
 description: 基于指南回答糖尿病问题，超出范围时明确拒绝
 tools:
   - query_guideline_rag
+required_tools:
+  - query_guideline_rag
 max_steps: 4
 on_failure: return_partial
 input:

@@ -20,9 +20,27 @@ class RunnableSubgraph:
         self.name = owner.name
         self.description = owner.description
         self.writes = list(owner.writes)
+        self.reads = list(getattr(owner, "reads", []) or [])
         self.graph = graph
 
     def invoke(self, state: dict) -> dict:
+        context = dict(state.get("shared_context") or {})
+        missing = [key for key in self.reads if context.get(key) in (None, "")]
+        if missing:
+            joined = ", ".join(missing)
+            return {
+                "user_input": state.get("user_input") or "",
+                "shared_context": context,
+                "output": {},
+                "trace": [],
+                "errors": [
+                    {
+                        "source": self.name,
+                        "message": f"缺少读取字段: {joined}",
+                        "error_kind": "state",
+                    }
+                ],
+            }
         return self.graph.invoke(state)
 
 
@@ -137,6 +155,7 @@ class BaseSubgraph:
     name = ""
     description = ""
     writes: list[str] = []
+    reads: list[str] = []
     steps: list[str] = []
 
     def build(self, builder: StateGraph, runtime: SubgraphRuntime) -> None:

@@ -5,6 +5,8 @@ tools:
   - get_medication_plan
   - send_followup_reminder
   - log_risk_event
+required_tools:
+  - send_followup_reminder
 max_steps: 4
 on_failure: return_partial
 input:

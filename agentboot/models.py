@@ -27,6 +27,7 @@ class SkillSpec:
     on_failure: str = "return_partial"
     inputs: dict[str, FieldSpec] = field(default_factory=dict)
     outputs: dict[str, FieldSpec] = field(default_factory=dict)
+    required_tools: list[str] = field(default_factory=list)
     system_prompt: str = ""
 
     def __post_init__(self) -> None:

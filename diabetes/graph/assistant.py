@@ -18,6 +18,9 @@ class DiabetesAssistantGraph(BaseGraph):
     emergency_subgraph = "emergency_escalation"
     max_steps = 6
     high_risk_levels = ("high", "critical")
+    guard_field = "risk_level"
+    guard_values = ("high", "critical")
+    guard_subgraph = "emergency_escalation"
     emergency_symptoms = ("昏迷", "意识不清", "胸痛", "抽搐", "叫不醒", "手抖")
     critical_tool = "check_critical_value"
 
@@ -108,7 +111,7 @@ class DiabetesAssistantGraph(BaseGraph):
         return "\n".join(parts)
 
 
-def build_app(model=None, router=None) -> AgentBootApplication:
+def build_app(model=None, router=None, trace_sink=None) -> AgentBootApplication:
     """装配糖尿病示例。不传模型时，Agent 与路由都走可重复的离线实现。"""
-    app = AgentBootApplication(model=model, router=router)
+    app = AgentBootApplication(model=model, router=router, trace_sink=trace_sink)
     return app.scan("diabetes")

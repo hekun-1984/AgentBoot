@@ -9,6 +9,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 
+from agentboot.contract import output_problems
 from agentboot.exceptions import AgentExecutionError, RegistrationError, SkillError
 from agentboot.models import AgentResult, FieldSpec, SkillSpec
 from agentboot.skill import load_skill
@@ -64,6 +65,7 @@ class BaseAgent:
     skill_path: str | None = None
     input_fields: dict[str, str] = {}
     output_fields: dict[str, str] = {}
+    required_tools: list[str] = []
 
     def __init__(self) -> None:
         self.spec = self._load_spec()
@@ -81,7 +83,7 @@ class BaseAgent:
             for key, text in self.input_fields.items()
         }
         outputs = {
-            key: FieldSpec(name=key, description=text, required=False)
+            key: FieldSpec(name=key, description=text, required=True)
             for key, text in self.output_fields.items()
         }
         return SkillSpec(
@@ -92,6 +94,7 @@ class BaseAgent:
             on_failure=self.on_failure,
             inputs=inputs,
             outputs=outputs,
+            required_tools=list(self.required_tools),
             system_prompt=self.description,
         )
 
@@ -189,6 +192,32 @@ class BaseAgent:
                 if tool_node is None:
                     return END
                 return "tools"
+            return "gate"
+
+        def missing_required(state: AgentState) -> list[str]:
+            called = {
+                item.name
+                for item in state.get("messages") or []
+                if isinstance(item, ToolMessage) and getattr(item, "status", None) != "error" and item.name
+            }
+            return [name for name in self.spec.required_tools if name not in called]
+
+        def gate(state: AgentState) -> dict:
+            missing = missing_required(state)
+            if not missing:
+                return {"awaiting_required_tools": False}
+            if tool_node is None or state.get("steps", 0) >= self.spec.max_steps:
+                return self._fail(state, f"未调用必需工具: {', '.join(missing)}", "llm")
+            return {
+                "awaiting_required_tools": True,
+                "messages": [HumanMessage(content=f"结束前必须调用这些工具: {', '.join(missing)}")],
+            }
+
+        def after_gate(state: AgentState) -> str:
+            if state.get("failed"):
+                return END
+            if state.get("awaiting_required_tools"):
+                return "model"
             return "parse"
 
         def observe(state: AgentState) -> dict:
@@ -241,6 +270,9 @@ class BaseAgent:
                 return self._fail(state, f"结构化输出失败: {exc}", "llm")
             if self.spec.outputs:
                 data = {key: data.get(key) for key in self.spec.outputs}
+            problems = output_problems(data, self.spec.outputs)
+            if problems:
+                return self._fail(state, "；".join(problems), "llm")
             context = dict(state.get("shared_context") or {})
             context.update({key: value for key, value in data.items() if value is not None})
             return self._close(state, output=data, shared_context=context)
@@ -248,6 +280,7 @@ class BaseAgent:
         builder = StateGraph(AgentState)
         builder.add_node("prepare", prepare)
         builder.add_node("model", model_node)
+        builder.add_node("gate", gate)
         builder.add_node("parse", parse)
         builder.add_edge(START, "prepare")
         builder.add_conditional_edges("prepare", lambda state: END if state.get("failed") else "model")
@@ -260,8 +293,9 @@ class BaseAgent:
         else:
             builder.add_conditional_edges(
                 "model",
-                lambda state: END if state.get("failed") else "parse",
+                lambda state: END if state.get("failed") else "gate",
             )
+        builder.add_conditional_edges("gate", after_gate)
         builder.add_edge("parse", END)
         return builder.compile()
 

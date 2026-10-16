@@ -5,6 +5,10 @@ tools:
   - get_patient_profile
   - get_glucose_records
   - get_medication_plan
+required_tools:
+  - get_patient_profile
+  - get_glucose_records
+  - get_medication_plan
 max_steps: 4
 on_failure: return_partial
 input:

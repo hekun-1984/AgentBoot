@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import copy
 import time
-from typing import Any
+from agentboot.audit import current_call_id
 
 
 def snapshot(value: Any) -> Any:
@@ -48,6 +48,7 @@ def new_span(
         "state_before": snapshot(state_before),
         "state_after": snapshot(state_after),
         "children": list(children or []),
+        "call_id": current_call_id(),
     }
 
 

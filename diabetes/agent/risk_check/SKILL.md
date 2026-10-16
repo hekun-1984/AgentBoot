@@ -4,6 +4,8 @@ description: 判断当前指标是否高危，并给出风险等级
 tools:
   - check_critical_value
   - query_guideline_rag
+required_tools:
+  - query_guideline_rag
 max_steps: 4
 on_failure: return_partial
 input:

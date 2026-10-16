@@ -40,8 +40,10 @@ class BaseGraph:
     fallback_subgraph = ""
     emergency_subgraph = ""
     max_steps = 6
-    high_risk_levels = ("high", "critical")
     emergency_symptoms: tuple[str, ...] = ()
+    guard_field = ""
+    guard_values: tuple = ()
+    guard_subgraph = ""
 
     def __init__(self) -> None:
         self.model = None
@@ -240,17 +242,14 @@ class BaseGraph:
 
         def guard(state: GraphState) -> dict:
             context = state.get("shared_context") or {}
-            level = context.get("risk_level")
+            target = self.guard_subgraph
             ran = set(state.get("results") or {})
-            if (
-                level in self.high_risk_levels
-                and self.emergency_subgraph
-                and self.emergency_subgraph not in ran
-            ):
+            value = context.get(self.guard_field) if self.guard_field else None
+            if target and value in self.guard_values and target not in ran:
                 plan = self.validate_plan(
                     {
-                        "steps": [{"subgraph": self.emergency_subgraph}],
-                        "reason": f"{state.get('route_reason') or ''} | 高危兜底".strip(" |"),
+                        "steps": [{"subgraph": target}],
+                        "reason": f"{state.get('route_reason') or ''} | 字段兜底:{self.guard_field}={value}".strip(" |"),
                     }
                 )
                 return {"plan": plan, "wave_index": 0, "force_guard": True, "route_reason": plan["reason"]}

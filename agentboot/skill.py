@@ -10,7 +10,14 @@ from agentboot.exceptions import SkillError
 from agentboot.models import FAILURE_POLICIES, FieldSpec, SkillSpec
 
 
-def _fields(raw: object) -> dict[str, FieldSpec]:
+def _names(raw: object, label: str) -> list[str]:
+    values = raw or []
+    if not isinstance(values, list) or not all(isinstance(item, str) for item in values):
+        raise SkillError(f"{label} 必须是字符串列表")
+    return list(values)
+
+
+def _fields(raw: object, *, default_required: bool = False) -> dict[str, FieldSpec]:
     if not raw:
         return {}
     if not isinstance(raw, dict):
@@ -18,7 +25,7 @@ def _fields(raw: object) -> dict[str, FieldSpec]:
     fields: dict[str, FieldSpec] = {}
     for name, spec in raw.items():
         if isinstance(spec, str):
-            fields[name] = FieldSpec(name=name, description=spec)
+            fields[name] = FieldSpec(name=name, description=spec, required=default_required)
             continue
         if not isinstance(spec, dict):
             raise SkillError(f"字段 {name} 的声明无法识别")
@@ -26,7 +33,7 @@ def _fields(raw: object) -> dict[str, FieldSpec]:
             name=name,
             type_name=str(spec.get("type", "str")),
             description=str(spec.get("description", "")),
-            required=bool(spec.get("required", False)),
+            required=bool(spec.get("required", default_required)),
         )
     return fields
 
@@ -47,16 +54,20 @@ def load_skill(path: str | Path) -> SkillSpec:
     on_failure = str(data.get("on_failure", "return_partial"))
     if on_failure not in FAILURE_POLICIES:
         raise SkillError(f"{file_path} 的 on_failure 不合法: {on_failure}")
-    tools = data.get("tools") or []
-    if not isinstance(tools, list) or not all(isinstance(item, str) for item in tools):
-        raise SkillError(f"{file_path} 的 tools 必须是字符串列表")
+    tools = _names(data.get("tools"), f"{file_path} 的 tools")
+    required_tools = _names(data.get("required_tools"), f"{file_path} 的 required_tools")
+    unknown = [name for name in required_tools if name not in tools]
+    if unknown:
+        joined = ", ".join(unknown)
+        raise SkillError(f"{file_path} 的 required_tools 不在 tools 中: {joined}")
     return SkillSpec(
         name=str(data.get("name", "")).strip(),
         description=str(data.get("description", "")).strip(),
-        tools=list(tools),
+        tools=tools,
         max_steps=int(data.get("max_steps", 6)),
         on_failure=on_failure,
         inputs=_fields(data.get("input")),
-        outputs=_fields(data.get("output")),
+        outputs=_fields(data.get("output"), default_required=True),
+        required_tools=required_tools,
         system_prompt=parts[2].strip(),
     )

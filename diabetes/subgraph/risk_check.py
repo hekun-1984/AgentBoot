@@ -6,7 +6,7 @@ from agentboot import BaseSubgraph
 class DiabetesRiskCheckSubgraph(BaseSubgraph):
     name = "diabetes_risk_check"
     description = "拉取患者血糖、用药和病史，判断低血糖、高血糖和是否需要人工介入。"
-    reads = ["patient_id", "user_input", "mentioned_glucose"]
+    reads = ["patient_id", "user_input"]
     writes = [
         "patient_profile",
         "glucose_records",
