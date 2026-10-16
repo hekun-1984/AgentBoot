@@ -2,40 +2,54 @@
 # set AGENTBOOT_MODELS=examples/diabetes/models.yaml
 # 风险评估 Agent 使用 reason，其余对话 Agent 使用 general。
 # 指南检索在配置了 embed、rerank 时改走向量和精排。
+# 自建服务与云上模型填法相同，用 base_url 指向自己的地址。本地不校验密钥时，LOCAL_API_KEY 设成占位值。
 
 route:
-  default: fast-a
+  default: local-route
   options:
+    - name: local-route
+      provider: ollama
+      model: qwen2.5:7b
+      base_url: http://127.0.0.1:11434
     - name: fast-a
       provider: openai
       model: gpt-4.1-mini
       api_key_env: OPENAI_API_KEY
-    - name: fast-b
-      provider: dashscope
-      model: qwen-turbo
-      api_key_env: DASHSCOPE_API_KEY
 
 general:
+  default: local
   options:
+    - name: local
+      provider: openai
+      model: qwen2.5-32b
+      base_url: http://10.0.0.8:8000/v1
+      api_key_env: LOCAL_API_KEY
     - name: main
       provider: openai
       model: gpt-4.1
       api_key_env: OPENAI_API_KEY
 
 reason:
-  default: deep
+  default: local-deep
   options:
+    - name: local-deep
+      provider: openai
+      model: qwen2.5-72b
+      base_url: http://10.0.0.8:8000/v1
+      api_key_env: LOCAL_API_KEY
     - name: deep
       provider: openai
       model: gpt-4.1
       api_key_env: OPENAI_API_KEY
-    - name: deep-backup
-      provider: dashscope
-      model: qwen-max
-      api_key_env: DASHSCOPE_API_KEY
 
 embed:
+  default: local-vectors
   options:
+    - name: local-vectors
+      provider: openai
+      model: bge-m3
+      base_url: http://10.0.0.8:8000/v1
+      api_key_env: LOCAL_API_KEY
     - name: vectors
       provider: openai
       model: text-embedding-3-small

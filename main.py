@@ -4,9 +4,10 @@
 
   set AGENTBOOT_MODEL=openai:gpt-4o-mini
 
-或使用案例里的模型表（密钥放在环境变量里）：
+或使用案例里的模型表。自建服务把 `base_url` 改成自己的地址，密钥放在环境变量里：
 
   set AGENTBOOT_MODELS=examples/diabetes/models.yaml
+  set LOCAL_API_KEY=local
   set OPENAI_API_KEY=...
 """
 

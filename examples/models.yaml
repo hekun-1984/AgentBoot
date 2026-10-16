@@ -1,6 +1,9 @@
 # 模型表示例。复制后把 AGENTBOOT_MODELS 指到本文件。
 # 密钥写在环境变量里，不要写进这个文件。
 # 每个槽位的 default 是默认模型，其余按书写顺序在默认模型不可用时接替。
+# 自建服务填法相同：provider 仍写协议类型，base_url 写自己的地址，model 写服务里发布的名字。
+# 兼容 OpenAI 接口（vLLM、SGLang、Xinference）时 provider 填 openai。
+# 本地不校验密钥时，把 LOCAL_API_KEY 设成占位值，例如 local。
 
 route:
   default: fast-a
@@ -13,9 +16,19 @@ route:
       provider: dashscope
       model: qwen-turbo
       api_key_env: DASHSCOPE_API_KEY
+    - name: local-route
+      provider: ollama
+      model: qwen2.5:7b
+      base_url: http://127.0.0.1:11434
 
 general:
+  default: local
   options:
+    - name: local
+      provider: openai
+      model: qwen2.5-32b
+      base_url: http://10.0.0.8:8000/v1
+      api_key_env: LOCAL_API_KEY
     - name: main
       provider: openai
       model: gpt-4.1
@@ -25,30 +38,39 @@ extract:
   options:
     - name: forms
       provider: openai
-      model: gpt-4.1-mini
-      api_key_env: OPENAI_API_KEY
+      model: qwen2.5-32b
+      base_url: http://10.0.0.8:8000/v1
+      api_key_env: LOCAL_API_KEY
 
 reason:
-  default: deep
+  default: local-deep
   options:
+    - name: local-deep
+      provider: openai
+      model: qwen2.5-72b
+      base_url: http://10.0.0.8:8000/v1
+      api_key_env: LOCAL_API_KEY
     - name: deep
       provider: openai
       model: gpt-4.1
       api_key_env: OPENAI_API_KEY
-    - name: deep-backup
-      provider: dashscope
-      model: qwen-max
-      api_key_env: DASHSCOPE_API_KEY
 
 vision:
   options:
-    - name: eyes
+    - name: local-eyes
       provider: openai
-      model: gpt-4.1
-      api_key_env: OPENAI_API_KEY
+      model: qwen2.5-vl
+      base_url: http://10.0.0.8:8000/v1
+      api_key_env: LOCAL_API_KEY
 
 embed:
+  default: local-vectors
   options:
+    - name: local-vectors
+      provider: openai
+      model: bge-m3
+      base_url: http://10.0.0.8:8000/v1
+      api_key_env: LOCAL_API_KEY
     - name: vectors
       provider: openai
       model: text-embedding-3-small

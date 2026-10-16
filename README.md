@@ -49,24 +49,21 @@ python main.py
 按用途配置多模型时，把表写到 YAML，并用 `AGENTBOOT_MODELS` 指向它。密钥放在环境变量里，配置只写变量名。每个槽位用 `default` 指定默认模型，其余按书写顺序作备选。Agent 在 `SKILL.md` 里写 `model: reason` 这类槽位名；不写就用 `general`。主图路由用 `route`，没配时改用 `general`。
 
 ```yaml
-route:
-  default: fast-a
-  options:
-    - name: fast-a
-      provider: openai
-      model: gpt-4.1-mini
-      api_key_env: OPENAI_API_KEY
-    - name: fast-b
-      provider: dashscope
-      model: qwen-turbo
-      api_key_env: DASHSCOPE_API_KEY
 general:
+  default: local
   options:
+    - name: local
+      provider: openai
+      model: qwen2.5-32b
+      base_url: http://10.0.0.8:8000/v1
+      api_key_env: LOCAL_API_KEY
     - name: main
       provider: openai
       model: gpt-4.1
       api_key_env: OPENAI_API_KEY
 ```
+
+自建服务用同一张表。`provider` 写它兼容的协议，`base_url` 写自己的地址，`model` 写服务里发布的名字。vLLM、SGLang、Xinference 这类 OpenAI 兼容接口，`provider` 填 `openai`。本地不校验密钥时，把 `LOCAL_API_KEY` 设成占位值，例如 `local`。Ollama 则把 `provider` 写成 `ollama`，`base_url` 写成 `http://127.0.0.1:11434`。`embed` 同样可以指向自己的向量接口。`rerank` 仍要对应的厂商集成包，不能只填地址。
 
 内置槽位是 `route`、`general`、`extract`、`reason`、`vision`、`embed`、`rerank`。前五个是对话模型。`embed` 和 `rerank` 只给检索 Tool 用，通过 `catalog.embeddings()` 和 `catalog.reranker()` 调用。也可以增加自定义槽位名。
 

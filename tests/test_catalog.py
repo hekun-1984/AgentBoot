@@ -349,8 +349,13 @@ def test_shipped_model_examples_parse():
     expense = ModelCatalog.read(root / "expense" / "models.yaml")
     assert set(shared.slots) == {"route", "general", "extract", "reason", "vision", "embed", "rerank"}
     assert shared.slots["route"].default == "fast-a"
-    assert [item.name for item in shared.slots["route"].ordered()] == ["fast-a", "fast-b"]
-    assert diabetes.slots["reason"].default == "deep"
-    assert "embed" in diabetes.slots and "rerank" in diabetes.slots
-    assert expense.slots["reason"].kind == "chat"
+    assert [item.name for item in shared.slots["route"].ordered()] == ["fast-a", "fast-b", "local-route"]
+    assert shared.slots["route"].ordered()[-1].base_url == "http://127.0.0.1:11434"
+    assert shared.slots["general"].default == "local"
+    assert shared.slots["general"].ordered()[0].base_url == "http://10.0.0.8:8000/v1"
+    assert diabetes.slots["general"].ordered()[0].base_url == "http://10.0.0.8:8000/v1"
+    assert diabetes.slots["embed"].default == "local-vectors"
+    assert "rerank" in diabetes.slots
+    assert expense.slots["reason"].ordered()[0].provider == "openai"
+    assert expense.slots["reason"].ordered()[0].base_url == "http://10.0.0.8:8000/v1"
     assert expense.slots["rerank"].kind == "rerank"
