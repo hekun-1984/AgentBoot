@@ -9,9 +9,11 @@ import pkgutil
 from pathlib import Path
 from typing import Any
 
+from langgraph.types import Command
+
 from agentboot.agent import BaseAgent
 from agentboot.audit import TraceSink, build_record, call_scope, new_call_id
-from agentboot.exceptions import RegistrationError
+from agentboot.exceptions import ConfigurationError, RegistrationError
 from agentboot.graph import BaseGraph
 from agentboot.catalog import ModelCatalog, use_catalog
 from agentboot.llm import ChatModel, load_model
@@ -39,21 +41,135 @@ class CompiledApplication:
         shared = dict(initial)
         shared.setdefault("user_input", user_input)
         call_id = new_call_id()
+        run_id = new_call_id() if self.graph.checkpointer is not None else None
+        config = {"configurable": {"thread_id": run_id}} if run_id else None
+        payload = {
+            "user_input": user_input,
+            "shared_context": shared,
+            "results": {},
+            "trace": [],
+            "errors": [],
+            "wave_index": 0,
+            "step_count": 0,
+        }
         with call_scope(call_id):
-            state = self.compiled.invoke(
-                {
-                    "user_input": user_input,
-                    "shared_context": shared,
-                    "results": {},
-                    "trace": [],
-                    "errors": [],
-                    "wave_index": 0,
-                    "step_count": 0,
-                }
+            state = self.compiled.invoke(payload) if config is None else self.compiled.invoke(payload, config)
+        return self._finish(
+            state,
+            config=config,
+            call_id=call_id,
+            user_input=user_input,
+            context=initial,
+            trace_sink=trace_sink,
+            run_id=run_id,
+        )
+
+    def resume(self, run_id: str, decision: Any, *, trace_sink: TraceSink | None = None) -> dict:
+        """用同一次流程的编号和人工决定，从暂停处继续。"""
+        self._require_checkpoint()
+        call_id = new_call_id()
+        config = {"configurable": {"thread_id": run_id}}
+        with call_scope(call_id):
+            state = self.compiled.invoke(Command(resume=decision), config)
+        user_input = str((self._checkpoint_values(config) or {}).get("user_input") or "")
+        return self._finish(
+            state,
+            config=config,
+            call_id=call_id,
+            user_input=user_input,
+            context={},
+            trace_sink=trace_sink,
+            run_id=run_id,
+        )
+
+    def continue_run(self, run_id: str, *, trace_sink: TraceSink | None = None) -> dict:
+        """从上次存档接着走。正在等人时只返回等待状态，不往下执行。"""
+        self._require_checkpoint()
+        config = {"configurable": {"thread_id": run_id}}
+        snapshot = self.compiled.get_state(config)
+        values = dict(snapshot.values or {})
+        user_input = str(values.get("user_input") or "")
+        if snapshot.interrupts:
+            return self._finish(
+                {"__interrupt__": snapshot.interrupts},
+                config=config,
+                call_id=new_call_id(),
+                user_input=user_input,
+                context={},
+                trace_sink=trace_sink,
+                run_id=run_id,
+                values=values,
             )
-        final = dict(state.get("final_output") or {})
+        if not snapshot.next:
+            return self._finish(
+                values,
+                config=config,
+                call_id=new_call_id(),
+                user_input=user_input,
+                context={},
+                trace_sink=trace_sink,
+                run_id=run_id,
+                values=values,
+            )
+        call_id = new_call_id()
+        with call_scope(call_id):
+            state = self.compiled.invoke(None, config)
+        return self._finish(
+            state,
+            config=config,
+            call_id=call_id,
+            user_input=user_input,
+            context={},
+            trace_sink=trace_sink,
+            run_id=run_id,
+        )
+
+    def _require_checkpoint(self) -> None:
+        if self.graph.checkpointer is None:
+            raise ConfigurationError("当前主图没有开启存档，不能恢复。把 pause_for_human 设为真，或传入 checkpointer。")
+
+    def _checkpoint_values(self, config: dict | None) -> dict | None:
+        if not config or self.graph.checkpointer is None:
+            return None
+        snapshot = self.compiled.get_state(config)
+        return dict(snapshot.values or {})
+
+    def _finish(
+        self,
+        state: Any,
+        *,
+        config: dict | None,
+        call_id: str,
+        user_input: str,
+        context: dict,
+        trace_sink: TraceSink | None,
+        run_id: str | None,
+        values: dict | None = None,
+    ) -> dict:
+        interrupts = _interrupt_values(state)
+        if interrupts:
+            stored = values if values is not None else (self._checkpoint_values(config) or {})
+            payload = interrupts[0]
+            answer = payload.get("message") if isinstance(payload, dict) else "流程已暂停，等待人工决定。"
+            final = {
+                "status": "waiting_human",
+                "answer": answer,
+                "interrupt": payload,
+                "shared_context": dict(stored.get("shared_context") or {}),
+                "results": dict(stored.get("results") or {}),
+                "plan": dict(stored.get("plan") or {}),
+                "route_reason": stored.get("route_reason") or "",
+                "trace": list(stored.get("trace") or []),
+                "errors": list(stored.get("errors") or []),
+            }
+        else:
+            source = values if values is not None and state.get("final_output") is None else state
+            final = dict(source.get("final_output") or {})
         final["call_id"] = call_id
-        record = build_record(call_id=call_id, user_input=user_input, context=initial, output=final)
+        if run_id:
+            final["run_id"] = run_id
+            final.setdefault("status", "completed")
+        record = build_record(call_id=call_id, user_input=user_input, context=context, output=final)
         sink = self.trace_sink if trace_sink is None else trace_sink
         if sink is not None:
             sink.write(record)
@@ -84,6 +200,18 @@ class CompiledApplication:
         )
 
 
+def _interrupt_values(state: Any) -> list[Any]:
+    if not hasattr(state, "get"):
+        return []
+    raw = state.get("__interrupt__")
+    if not raw:
+        return []
+    values = []
+    for item in raw:
+        values.append(item.value if hasattr(item, "value") else item)
+    return values
+
+
 _UNSET = object()
 
 
@@ -106,6 +234,7 @@ class AgentBootApplication:
         graph: str | None = None,
         trace_sink: TraceSink | None = None,
         models: ModelCatalog | str | Path | dict | None = None,
+        checkpointer: Any = None,
     ) -> None:
         self.registry = Registry()
         self.graph_name = graph
@@ -115,6 +244,7 @@ class AgentBootApplication:
         self.catalog = _resolve_catalog(models)
         use_catalog(self.catalog)
         self.trace_sink = trace_sink
+        self.checkpointer = checkpointer
         self._compiled: CompiledApplication | None = None
 
     def include(self, *components: object) -> "AgentBootApplication":
@@ -167,12 +297,24 @@ class AgentBootApplication:
         subgraphs = {}
         for name, cls in self.registry.subgraphs.items():
             subgraphs[name] = cls().compile(agents, self.registry.tools)
-        graph = graph_cls().bind(subgraphs, self.registry.tools, self._router_model())
+        graph = graph_cls().bind(
+            subgraphs,
+            self.registry.tools,
+            self._router_model(),
+            checkpointer=self.checkpointer,
+        )
+        self.checkpointer = graph.checkpointer
         self._compiled = CompiledApplication(graph, agents, subgraphs, self.trace_sink)
         return self._compiled
 
     def invoke(self, user_input: str, context: dict | None = None, *, trace_sink: TraceSink | None = None) -> dict:
         return self.compile().invoke(user_input, context, trace_sink=trace_sink)
+
+    def resume(self, run_id: str, decision: Any, *, trace_sink: TraceSink | None = None) -> dict:
+        return self.compile().resume(run_id, decision, trace_sink=trace_sink)
+
+    def continue_run(self, run_id: str, *, trace_sink: TraceSink | None = None) -> dict:
+        return self.compile().continue_run(run_id, trace_sink=trace_sink)
 
     def replay(self, record: dict, *, live: bool = False, trace_sink: TraceSink | None = None) -> dict:
         return self.compile().replay(record, live=live, trace_sink=trace_sink)

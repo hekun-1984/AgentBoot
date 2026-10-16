@@ -74,8 +74,8 @@ general:
 1. 新建业务包，用 `@tool` 写原子能力。函数签名就是输入，返回值就是输出。
 2. 每个 Agent 一个目录：`SKILL.md` 写契约和系统提示词，`agent.py` 继承 `BaseAgent`。没有模型时实现 `offline_step`，有模型时同一张图会改为工具调用循环。
 3. 继承 `BaseSubgraph`。顺序流程填 `steps`；中间要插入 Tool 时覆盖 `build`，用 `add_edge` 把边写死。用 `writes` 列出允许写回主图的字段。
-4. 继承 `BaseGraph`，在 `subgraphs` 里列出白名单，设 `fallback_subgraph` 和 `max_steps`。需要按状态兜底时声明 `guard_field`、`guard_values` 和 `guard_subgraph`。路由前的规则检查写在 `screen()`。
-5. `AgentBootApplication().scan("你的包").invoke(问题, context)`。
+4. 继承 `BaseGraph`，在 `subgraphs` 里列出白名单，设 `fallback_subgraph` 和 `max_steps`。需要按状态兜底时声明 `guard_field`、`guard_values` 和 `guard_subgraph`。若要先等人决定再进入兜底子图，把 `pause_for_human` 设为真。路由前的规则检查写在 `screen()`。
+5. `AgentBootApplication().scan("你的包").invoke(问题, context)`。暂停时返回 `status=waiting_human` 和 `run_id`，用 `resume(run_id, decision)` 从停下的位置继续。
 
 单独回归某一个 Agent：
 

@@ -6,8 +6,9 @@ import json
 from typing import Any, Literal
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
-from langgraph.types import Send
+from langgraph.types import Send, interrupt
 from pydantic import Field, create_model
 
 from agentboot.agent import parse_json_object
@@ -62,6 +63,7 @@ class BaseGraph:
     guard_field = ""
     guard_values: tuple = ()
     guard_subgraph = ""
+    pause_for_human = False
 
     def __init__(self) -> None:
         self.model = None
@@ -69,8 +71,16 @@ class BaseGraph:
         self._compiled_subgraphs: dict[str, Any] = {}
         self.catalog: list[dict[str, str]] = []
         self.graph = None
+        self.checkpointer = None
 
-    def bind(self, subgraphs: dict[str, Any], tools: dict[str, Any], model: Any = None) -> "BaseGraph":
+    def bind(
+        self,
+        subgraphs: dict[str, Any],
+        tools: dict[str, Any],
+        model: Any = None,
+        *,
+        checkpointer: Any = None,
+    ) -> "BaseGraph":
         missing = [name for name in self.subgraphs if name not in subgraphs]
         if missing:
             joined = ", ".join(missing)
@@ -82,6 +92,9 @@ class BaseGraph:
             {"name": name, "description": subgraphs[name].description}
             for name in self.subgraphs
         ]
+        if checkpointer is None and self.pause_for_human:
+            checkpointer = InMemorySaver()
+        self.checkpointer = checkpointer
         self.graph = self.compile()
         return self
 
@@ -275,8 +288,26 @@ class BaseGraph:
 
         def after_guard(state: GraphState) -> str:
             if state.get("force_guard"):
+                decided = "human_decision" in (state.get("shared_context") or {})
+                if self.pause_for_human and not decided:
+                    return "wait"
                 return "fanout"
             return "aggregate"
+
+        def wait(state: GraphState) -> dict:
+            context = state.get("shared_context") or {}
+            value = context.get(self.guard_field)
+            decision = interrupt(
+                {
+                    "status": "waiting_human",
+                    "field": self.guard_field,
+                    "value": value,
+                    "subgraph": self.guard_subgraph,
+                    "user_input": state.get("user_input") or "",
+                    "message": f"等待人工决定是否继续 {self.guard_subgraph}",
+                }
+            )
+            return {"shared_context": {"human_decision": decision}}
 
         def aggregate(state: GraphState) -> dict:
             started = start_timer()
@@ -316,9 +347,16 @@ class BaseGraph:
         builder.add_conditional_edges("fanout", fanout, ["run_subgraph", "guard"])
         builder.add_edge("run_subgraph", "join")
         builder.add_edge("join", "fanout")
-        builder.add_conditional_edges("guard", after_guard, ["fanout", "aggregate"])
+        if self.pause_for_human:
+            builder.add_node("wait", wait)
+            builder.add_conditional_edges("guard", after_guard, ["fanout", "aggregate", "wait"])
+            builder.add_edge("wait", "fanout")
+        else:
+            builder.add_conditional_edges("guard", after_guard, ["fanout", "aggregate"])
         builder.add_edge("aggregate", END)
-        return builder.compile()
+        if self.checkpointer is None:
+            return builder.compile()
+        return builder.compile(checkpointer=self.checkpointer)
 
     def _llm_route(self, user_input: str, shared_context: dict) -> dict:
         catalog = json.dumps(self.catalog, ensure_ascii=False)
