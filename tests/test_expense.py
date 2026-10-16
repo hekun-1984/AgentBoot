@@ -22,6 +22,21 @@ def test_entertainment_over_limit_uses_declared_guard():
     assert "不要自行入账" in result["answer"]
 
 
+def test_replay_keeps_the_escalation_ticket_until_live():
+    from agentboot.audit import MemoryTraceSink
+
+    sink = MemoryTraceSink()
+    app = build_app(trace_sink=sink)
+    first = app.invoke("这张招待费请审批", {"expense_id": "e200"})
+    assert len(STORE.tickets) == 1
+    replayed = app.replay(sink.records[0])
+    assert len(STORE.tickets) == 1
+    assert "不要自行入账" in replayed["answer"]
+    assert replayed["call_id"] != first["call_id"]
+    app.replay(sink.records[0], live=True)
+    assert len(STORE.tickets) == 2
+
+
 def test_unknown_question_falls_back_to_policy_text():
     result = build_app().invoke("今天天气怎么样？", {})
     assert result["plan"]["steps"][0]["subgraph"] == "policy_reference"

@@ -396,3 +396,94 @@ def test_distribution_contains_only_the_framework():
 
     data = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8"))
     assert data["tool"]["setuptools"]["packages"]["find"]["include"] == ["agentboot*"]
+
+
+def test_router_requests_a_plan_limited_to_registered_subgraphs():
+    class StructuredRouter:
+        def __init__(self):
+            self.schema = None
+
+        def invoke(self, messages, tools):
+            raise AssertionError("应走结构化路由")
+
+        def invoke_structured(self, messages, schema):
+            self.schema = schema
+            return {"reason": "按表选择", "steps": [{"subgraph": "only", "parallel_group": None}]}
+
+    class Marker(BaseAgent):
+        name = "marker"
+        description = "标记"
+        output_fields = {"token": "标记"}
+
+        def offline_step(self, messages, shared_context):
+            return AIMessage(content=json.dumps({"token": "yes"}))
+
+    class Only(BaseSubgraph):
+        name = "only"
+        description = "唯一子图"
+        writes = ["token"]
+        steps = ["marker"]
+
+    class Box(BaseGraph):
+        name = "box"
+        description = "主图"
+        subgraphs = ["only", "other"]
+        fallback_subgraph = "other"
+
+        def offline_route(self, user_input, catalog, shared_context):
+            return {"steps": [], "reason": "不应走离线"}
+
+        def render_answer(self, state):
+            return str((state.get("shared_context") or {}).get("token") or "")
+
+    class OtherAgent(BaseAgent):
+        name = "other_agent"
+        description = "兜底"
+        output_fields = {"token": "标记"}
+
+        def offline_step(self, messages, shared_context):
+            return AIMessage(content=json.dumps({"token": "fallback"}))
+
+    class Other(BaseSubgraph):
+        name = "other"
+        description = "兜底子图"
+        writes = ["token"]
+        steps = ["other_agent"]
+
+    router = StructuredRouter()
+    result = (
+        AgentBootApplication(router=router)
+        .include(Marker, OtherAgent, Only, Other, Box)
+        .invoke("go")
+    )
+    schema = router.schema.model_json_schema()
+    assert "only" in json.dumps(schema, ensure_ascii=False)
+    assert "other" in json.dumps(schema, ensure_ascii=False)
+    assert result["answer"] == "yes"
+    assert result["plan"]["steps"][0]["subgraph"] == "only"
+
+
+def test_frozen_replay_does_not_call_the_tool_again():
+    from agentboot.exceptions import ToolReplayError
+    from agentboot.tool import tool_replay
+
+    calls = {"n": 0}
+
+    @tool(name="ping", description="回声")
+    def ping(value: str) -> dict:
+        calls["n"] += 1
+        return {"value": value}
+
+    recorded = json.dumps({"ok": True, "data": {"value": "old"}}, ensure_ascii=False)
+    record = {"trace": [{"kind": "tool", "name": "ping", "output": recorded}]}
+    with tool_replay(record):
+        assert ping.__agentboot_tool__.lc_tool.invoke({"value": "new"}) == recorded
+    assert calls["n"] == 0
+    with tool_replay({"trace": []}):
+        try:
+            ping.__agentboot_tool__.lc_tool.invoke({"value": "new"})
+        except ToolReplayError:
+            pass
+        else:
+            raise AssertionError("记录里没有的调用不应执行")
+    assert calls["n"] == 0

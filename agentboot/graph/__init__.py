@@ -3,15 +3,33 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Literal
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
+from pydantic import Field, create_model
 
 from agentboot.agent import parse_json_object
 from agentboot.state import GraphState
 from agentboot.tracing import new_span, snapshot, start_timer
+
+
+def route_plan_model(names: list[str]):
+    """路由计划的结构。subgraph 只能取这张主图已经注册的名字。"""
+    allowed = tuple(dict.fromkeys(name for name in names if name))
+    if not allowed:
+        allowed = ("",)
+    step = create_model(
+        "RouteStep",
+        subgraph=(Literal[allowed], Field(description="已注册的子图")),
+        parallel_group=(str | None, Field(default=None, description="同一组则并行")),
+    )
+    return create_model(
+        "RoutePlan",
+        reason=(str, Field(description="选择原因")),
+        steps=(list[step], Field(description="执行步骤")),
+    )
 
 
 def group_waves(steps: list[dict]) -> list[list[str]]:
@@ -313,8 +331,17 @@ class BaseGraph:
             {"user_input": user_input, "catalog": json.loads(catalog), "shared_context": shared_context},
             ensure_ascii=False,
         )
-        message = self.model.invoke(
-            [SystemMessage(content=system), HumanMessage(content=human)],
-            [],
-        )
+        message_list = [
+            SystemMessage(content=system),
+            HumanMessage(content=human),
+        ]
+        structured = getattr(self.model, "invoke_structured", None)
+        if callable(structured):
+            data = structured(message_list, route_plan_model(list(self.subgraphs)))
+            if hasattr(data, "model_dump"):
+                data = data.model_dump()
+            if not isinstance(data, dict):
+                raise TypeError("路由结果不是对象")
+            return data
+        message = self.model.invoke(message_list, [])
         return parse_json_object(message.content if isinstance(message.content, str) else str(message.content))

@@ -17,7 +17,7 @@ from agentboot.catalog import ModelCatalog, use_catalog
 from agentboot.llm import ChatModel, load_model
 from agentboot.registry import Registry
 from agentboot.subgraph import BaseSubgraph
-from agentboot.tool import ToolEntry
+from agentboot.tool import ToolEntry, tool_replay
 
 
 class CompiledApplication:
@@ -59,8 +59,12 @@ class CompiledApplication:
             sink.write(record)
         return final
 
-    def replay(self, record: dict, *, trace_sink: TraceSink | None = None) -> dict:
-        return self.invoke(str(record.get("user_input") or ""), dict(record.get("context") or {}), trace_sink=trace_sink)
+    def replay(self, record: dict, *, live: bool = False, trace_sink: TraceSink | None = None) -> dict:
+        """默认用记录里的工具结果重放，不再次执行 Tool。live=True 才重新执行。"""
+        if live:
+            return self.invoke(str(record.get("user_input") or ""), dict(record.get("context") or {}), trace_sink=trace_sink)
+        with tool_replay(record):
+            return self.invoke(str(record.get("user_input") or ""), dict(record.get("context") or {}), trace_sink=trace_sink)
 
     def invoke_agent(self, name: str, context: dict | None = None, *, user_input: str = "") -> Any:
         if name not in self.agents:
@@ -170,8 +174,8 @@ class AgentBootApplication:
     def invoke(self, user_input: str, context: dict | None = None, *, trace_sink: TraceSink | None = None) -> dict:
         return self.compile().invoke(user_input, context, trace_sink=trace_sink)
 
-    def replay(self, record: dict, *, trace_sink: TraceSink | None = None) -> dict:
-        return self.compile().replay(record, trace_sink=trace_sink)
+    def replay(self, record: dict, *, live: bool = False, trace_sink: TraceSink | None = None) -> dict:
+        return self.compile().replay(record, live=live, trace_sink=trace_sink)
 
     def invoke_agent(self, name: str, context: dict | None = None, *, user_input: str = ""):
         return self.compile().invoke_agent(name, context, user_input=user_input)

@@ -9,6 +9,7 @@ from langgraph.graph import END, START, StateGraph
 
 from agentboot.agent import BaseAgent
 from agentboot.exceptions import RegistrationError
+from agentboot.tool import _EXECUTE, _replay_data, frozen_or_execute
 from agentboot.state import SubgraphState
 from agentboot.tracing import new_span, start_timer
 
@@ -116,7 +117,8 @@ class SubgraphRuntime:
                 kwargs[arg] = value
             error = None
             try:
-                data = entry.fn(**kwargs)
+                frozen = frozen_or_execute(tool_name)
+                data = entry.fn(**kwargs) if frozen is _EXECUTE else _replay_data(frozen)
                 ok = True
             except Exception as exc:
                 data = {"message": str(exc)}

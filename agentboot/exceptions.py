@@ -17,6 +17,10 @@ class ConfigurationError(AgentBootError):
     """模型配置缺失或无法解析。"""
 
 
+class ToolReplayError(AgentBootError):
+    """重放时记录里没有对应的工具调用。"""
+
+
 class AgentExecutionError(AgentBootError):
     """Agent 按 abort 策略失败时抛出。"""
 
